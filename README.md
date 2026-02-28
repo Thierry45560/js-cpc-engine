@@ -229,7 +229,7 @@ La langue est lue dans le cookie `firmware` (`english` par défaut).
 
 ## 🌐 Démo en ligne
 Retrouvez l'implémentation complète avec interface utilisateur sur :
-👉 [**www.js-cpc.fr**](https://www.js-cpc.fr)
+👉 [www.js-cpc.fr](https://www.js-cpc.fr)
 
 ---
 
