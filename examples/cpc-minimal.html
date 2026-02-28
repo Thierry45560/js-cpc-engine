@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  JS CPC — Amstrad CPC Emulator (Minimal Template)                           ║
+║  License : MIT                                                               ║
+║  Author  : Thierry MAIGNAN                                                   ║
+║                                                                              ║
+║  QUICK START                                                                 ║
+║  ──────────                                                                  ║
+║  1. Place your ROM files in the correct folder (see ROM section below).     ║
+║  2. Start a local HTTP server to avoid CORS errors (see CORS section below).║
+║  3. Edit the CONFIG section to customise the emulated machine.              ║
+║  4. Open http://localhost:8000/cpc-minimal.html in Chrome 113+ or any       ║
+║     modern browser, click RUN, load a .DSK file and enjoy!                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ROMs                                                                       │
+│  ────                                                                       │
+│  The emulator loads Amstrad ROM images at startup. You must supply your own │
+│  ROM files and place them in the expected folder.                            │
+│                                                                              │
+│  Expected folder structure:                                                  │
+│                                                                              │
+│    /roms/                                                                    │
+│      ├── cpc464/                                                             │
+│      │     ├── os464.rom       ← CPC 464 firmware (OS)                      │
+│      │     └── basic464.rom    ← CPC 464 BASIC ROM                          │
+│      ├── cpc6128/                                                            │
+│      │     ├── os6128.rom      ← CPC 6128 firmware (OS)                     │
+│      │     └── basic6128.rom   ← CPC 6128 BASIC ROM (+ AMSDOS)              │
+│      └── plus/                                                               │
+│            ├── asic6128plus.rom ← CPC 6128+ ASIC ROM                        │
+│            └── basic6128plus.rom                                             │
+│                                                                              │
+│  ROM files are NOT included in this repository for copyright reasons.       │
+│  You can find them by searching for "Amstrad CPC ROMs" — Amstrad/Sky        │
+│  released the original ROMs as freeware for personal non-commercial use.    │
+│                                                                              │
+│  The actual ROM paths are configured in js/core/memory/RomLoader.js.        │
+│  Edit that file if your ROMs live in a different directory.                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  CORS — Why you cannot open this file directly with file://                 │
+│  ──────────────────────────────────────────────────────────────────────────│
+│  Browsers block cross-origin requests when a page is loaded via the         │
+│  file:// protocol. Because the emulator fetches ROM files and JS modules    │
+│  at runtime, opening cpc-minimal.html by double-clicking it will fail with  │
+│  a CORS / network error in the browser console.                              │
+│                                                                              │
+│  Solution — run a local HTTP server from the project root folder:           │
+│                                                                              │
+│    Python 3 (recommended, built-in):                                        │
+│      cd /path/to/jscpc                                                       │
+│      python -m http.server 8000                                              │
+│      → open http://localhost:8000/cpc-minimal.html                          │
+│                                                                              │
+│    Python 2 (legacy):                                                        │
+│      python -m SimpleHTTPServer 8000                                         │
+│                                                                              │
+│    Node.js (npx, no install required):                                       │
+│      npx serve .                                                             │
+│      → open http://localhost:3000/cpc-minimal.html                          │
+│                                                                              │
+│    VS Code users:                                                            │
+│      Install the "Live Server" extension, right-click cpc-minimal.html      │
+│      and choose "Open with Live Server".                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JS CPC — Amstrad Emulator</title>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         DEPENDENCIES
+         All paths are relative to this file. Keep the folder structure intact:
+           /libs   → jquery, jszip, inflate
+           /css    → style.css
+           /js     → emulator source files
+    ════════════════════════════════════════════════════════════════════════ -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+          integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
+          crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="css/style.css">
+
+    <script src="libs/jquery-1.8.3.min.js"></script>
+    <script src="libs/inflate.js"></script>
+    <script src="libs/jszip.min.js"></script>
+
+    <script src="js/tools/Tools_Formatters.js"></script>
+    <script src="js/tools/ZipTools.js"></script>
+    <script src="js/adapters/graphics/WebGPURenderer.js"></script>
+    <script src="js/adapters/graphics/Canvas2DRenderer.js"></script>
+    <script src="js/adapters/graphics/RendererFactory.js"></script>
+    <script src="js/adapters/graphics/RendererBridge.js"></script>
+    <script src="js/adapters/webaudio/WebAudioHost.js"></script>
+    <script src="js/adapters/dom/UI_DOM.js"></script>
+    <script src="js/adapters/dom/Floppy_UI.js"></script>
+    <script src="js/core/cpu/Z80.js"></script>
+    <script src="js/core/memory/Memory.js"></script>
+    <script src="js/core/memory/RomLoader.js"></script>
+    <script src="js/core/system/PPI_8255.js"></script>
+    <script src="js/core/audio/AY38910.js"></script>
+    <script src="js/core/video/MC6845.js"></script>
+    <script src="js/core/video/ASIC.js"></script>
+    <script src="js/core/video/GateArray.js"></script>
+    <script src="js/core/video/Display.js"></script>
+    <script src="js/core/peripherals/Keyboard.js"></script>
+    <script src="js/core/peripherals/Printer.js"></script>
+    <script src="js/core/peripherals/DSK_Parser.js"></script>
+    <script src="js/core/peripherals/FDC_Controller.js"></script>
+    <script src="js/core/peripherals/Tape.js"></script>
+    <script src="js/core/peripherals/Snapshot.js"></script>
+    <script src="js/core/peripherals/Cartouche.js"></script>
+    <script src="js/core/bus/IO_Bus.js"></script>
+    <script src="js/core/bus/CPC_Bus.js"></script>
+    <script src="js/core/system/Config.js"></script>
+    <script src="js/core/system/Emulator_Core.js"></script>
+    <script src="js/core/system/Emulator_Setup.js"></script>
+    <script src="js/ui/pages/cpc-blank.js"></script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         ██████████████████████████████████████████████████████████████████████
+         ██                                                                  ██
+         ██   USER CONFIGURATION — edit this section to customise the CPC   ██
+         ██                                                                  ██
+         ██████████████████████████████████████████████████████████████████████
+
+         All settings below are read once at startup (before Run is clicked).
+         After changing a value, reload the page.
+
+    ════════════════════════════════════════════════════════════════════════ -->
+    <script>
+    /*
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │  1. MACHINE TYPE — which CPC boots by default                           │
+    │     Possible values (must match a <option value="…"> in the select):    │
+    │       "boot_cpc464"   → CPC 464  (64 KB RAM, tape-based)               │
+    │       "boot_cpc6128"  → CPC 6128 (128 KB RAM, disk-based) ← default    │
+    │       "boot_6128plus" → CPC 6128+ / PLUS with ASIC chip                │
+    └─────────────────────────────────────────────────────────────────────────┘
+    */
+    const CPC_MACHINE = "boot_cpc6128";
+
+    /*
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │  2. KEYBOARD / FIRMWARE LANGUAGE                                        │
+    │     Determines the ROM firmware and keyboard mapping loaded at boot.    │
+    │       "english"  → UK layout, English BASIC ROM  ← default             │
+    │       "french"   → AZERTY layout, French BASIC ROM                     │
+    │       "spanish"  → Spanish layout, Spanish BASIC ROM                   │
+    └─────────────────────────────────────────────────────────────────────────┘
+    */
+    const CPC_KEYBOARD = "english";
+
+    /*
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │  3. MONITOR TYPE                                                        │
+    │     Selects the colour palette / phosphor simulation applied to the     │
+    │     output canvas.                                                      │
+    │       "colour"    → standard RGB colour monitor (CTM644)  ← default    │
+    │       "green"     → green phosphor monochrome (GT65)                    │
+    │       "grayscale" → grey-scale monochrome                               │
+    └─────────────────────────────────────────────────────────────────────────┘
+    */
+    const CPC_MONITOR = "colour";
+
+    /*
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │  4. CRTC TYPE                                                           │
+    │     The CRT Controller chip variant fitted to the emulated machine.     │
+    │     Different CRTC types produce subtly different timing & raster       │
+    │     effects; some demos/games require a specific type.                  │
+    │       "type0" → HD6845S  — used in early CPC 464 units                 │
+    │       "type1" → UM6845R  — most common, fits 90 % of software ← default│
+    │       "type2" → MC6845   — used in some CPC 464 & 664 models           │
+    │       "type3" → ASIC     — used in CPC+ / GX4000                       │
+    └─────────────────────────────────────────────────────────────────────────┘
+    */
+    const CPC_CRTC = "type1";
+
+    /*
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │  5. RAM EXPANSION                                                       │
+    │     Enables or disables the 512 KB DK'tronics-compatible RAM expansion. │
+    │     Only effective on CPC 464 / 6128 (ignored on CPC+).                │
+    │       false → standard 64/128 KB RAM           ← default               │
+    │       true  → 512 KB expanded RAM                                       │
+    └─────────────────────────────────────────────────────────────────────────┘
+    */
+    const CPC_RAM_EXPANSION = false;
+
+    /*
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │  6. AUDIO MODE                                                          │
+    │     AY-3-8912 PSG output channel mixing.                                │
+    │       "stereo" → ABC stereo panning (left / centre / right)  ← default │
+    │       "mono"   → all three channels mixed to mono centre                │
+    └─────────────────────────────────────────────────────────────────────────┘
+    */
+    const CPC_AUDIO = "stereo";
+
+    /*
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │  7. AUTO-RUN                                                            │
+    │     When true the emulator automatically types RUN"<first_file> after   │
+    │     a DSK is inserted, saving a manual step.                            │
+    │       true  → auto-run first file on disk load  ← default              │
+    │       false → insert disk silently, user types RUN manually             │
+    └─────────────────────────────────────────────────────────────────────────┘
+    */
+    const CPC_AUTORUN = true;
+
+    /* ── Apply configuration at DOM-ready ────────────────────────────────── */
+    $(function () {
+        /* Machine */
+        $("#snapshot").val(CPC_MACHINE);
+
+        /* Keyboard / Firmware */
+        $("input[name='firmware'][value='" + CPC_KEYBOARD + "']").prop("checked", true);
+
+        /* Monitor */
+        $("input[name='monitor'][value='" + CPC_MONITOR + "']").prop("checked", true);
+
+        /* CRTC */
+        $("input[name='crtc'][value='" + CPC_CRTC + "']").prop("checked", true);
+
+        /* RAM expansion */
+        $("#ram-option").prop("checked", CPC_RAM_EXPANSION);
+
+        /* Audio */
+        $("input[name='audio'][value='" + CPC_AUDIO + "']").prop("checked", true);
+
+        /* Auto-run */
+        $("#autorun-option").prop("checked", CPC_AUTORUN);
+    });
+    </script>
+
+    <style>
+        /* ── Minimal page chrome ─────────────────────────────────────── */
+        body {
+            background: #1a1a1a;
+            color: #ccc;
+            font-family: monospace;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1.5rem 1rem;
+            gap: 1rem;
+            min-height: 100vh;
+        }
+
+        h1 {
+            font-size: 1rem;
+            letter-spacing: .2em;
+            color: #8ecfff;
+            text-transform: uppercase;
+            margin: 0;
+        }
+
+        /* ── Toolbar ─────────────────────────────────────────────────── */
+        .toolbar {
+            display: flex;
+            gap: .5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .toolbar button {
+            background: #2e2e2e;
+            color: #ddd;
+            border: 1px solid #444;
+            padding: .4rem .9rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: .85rem;
+            transition: background .15s, border-color .15s;
+        }
+        .toolbar button:hover   { background: #3e3e3e; border-color: #8ecfff; }
+        .toolbar button.danger  { border-color: #c0392b; }
+        .toolbar button.danger:hover { background: #c0392b; color: #fff; }
+
+        /* Machine selector */
+        #snapshot {
+            background: #2e2e2e;
+            color: #ddd;
+            border: 1px solid #444;
+            padding: .4rem .6rem;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: .85rem;
+            cursor: pointer;
+        }
+
+        /* ── Screen ──────────────────────────────────────────────────── */
+        #screen-wrapper {
+            position: relative;
+            line-height: 0;
+            border: 2px solid #333;
+            box-shadow: 0 0 32px rgba(0,120,255,.15);
+        }
+
+        #screen { display: block; }
+
+        .led-bar {
+            position: absolute;
+            bottom: 4px;
+            right: 6px;
+            display: flex;
+            gap: 4px;
+        }
+        .led {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #333;
+            font-size: 0;
+            border: 1px solid #555;
+        }
+        .led.on { background: #e74c3c; box-shadow: 0 0 6px #e74c3c; }
+
+        /* ── DSK panel ───────────────────────────────────────────────── */
+        .dsk-panel {
+            display: flex;
+            flex-direction: column;
+            gap: .5rem;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: .8rem 1rem;
+            width: 100%;
+            max-width: 768px;
+            box-sizing: border-box;
+        }
+
+        .dsk-panel h2 {
+            margin: 0 0 .4rem;
+            font-size: .8rem;
+            letter-spacing: .15em;
+            text-transform: uppercase;
+            color: #888;
+        }
+
+        .dsk-row {
+            display: flex;
+            gap: .5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .file-label {
+            flex: 1;
+            font-size: .8rem;
+            color: #999;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #drivea-programs {
+            font-size: .78rem;
+            color: #aaa;
+        }
+
+        /* ── FPS badge ───────────────────────────────────────────────── */
+        .fps {
+            font-size: .75rem;
+            color: #555;
+        }
+        .fps span { color: #8ecfff; }
+
+        /* hidden IDs required by the engine but not shown in this template */
+        #snapshot-input, #snapshot-filename, #snapshot-zipselect,
+        #snapshot-capture, #snapshot-eject,
+        #driveb-input, #driveb-filename, #driveb-eject, #driveb-new,
+        #driveb-programs, #driveb-zipselect, #fieldset-driveb,
+        #tape-input, #tape-filename, #tape-eject, #tape-new, #tape-save,
+        #tape-record, #tape-rewind, #tape-stop, #tape-play, #tape-forward,
+        #tape-counter, #tape-motor-status, #tape-programs, #fieldset-tape,
+        #cart-input, #cart-filename, #cart-eject, #cart-zipselect, #fieldset-cart,
+        #printer-card, #autotype-area, #autotype-send, #autotype-clear,
+        #button-step, #button-stepover,
+        #checkbox-sound, #checkbox-joystick, #checkbox-settings,
+        #checkbox-fullscreen, #button-turbo, #sound-volume,
+        /* settings modal engine hooks */
+        #option-panel, #option-panel-overlay, #settings-close,
+        /* hidden config radios/checkboxes read by engine */
+        .engine-config { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <h1>⬛ JS CPC &mdash; Amstrad Emulator</h1>
+
+    <!-- ── Toolbar ────────────────────────────────────────────────────────── -->
+    <div class="toolbar">
+        <select id="snapshot">
+            <optgroup label="Boot">
+                <option value="boot_cpc6128"  selected>CPC 6128</option>
+                <option value="boot_cpc464">CPC 464</option>
+                <option value="boot_6128plus">6128 Plus</option>
+            </optgroup>
+        </select>
+        <button id="button-run"   class="button"><i class="fas fa-play"></i> Run</button>
+        <button id="button-reset" class="button danger"><i class="fas fa-power-off"></i> Reset</button>
+        <span class="fps">FPS <span id="fps-counter">—</span></span>
+    </div>
+
+    <!-- ── Screen ─────────────────────────────────────────────────────────── -->
+    <div id="screen-wrapper">
+        <canvas id="screen" width="768" height="272"></canvas>
+        <div class="led-bar">
+            <div id="drivea-led" class="led" title="Drive A"></div>
+            <div id="driveb-led" class="led" title="Drive B"></div>
+        </div>
+    </div>
+
+    <!-- ── Drive A / DSK loader ───────────────────────────────────────────── -->
+    <div class="dsk-panel" id="fieldset-drivea">
+        <h2><i class="fas fa-compact-disc"></i> &nbsp;Disk Drive A:</h2>
+        <div class="dsk-row">
+            <span id="drivea-filename" class="file-label">No disk</span>
+            <input type="file" id="drivea-input" style="display:none" accept=".dsk,.zip">
+            <select id="drivea-zipselect" class="engine-config"></select>
+            <button class="button" onclick="$('#drivea-input').click()">
+                <i class="fas fa-folder-open"></i> Load .DSK
+            </button>
+            <button id="drivea-new"   class="button" title="Blank disk"><i class="fas fa-plus-circle"></i></button>
+            <button id="drivea-eject" class="button danger disabled-button" title="Eject">
+                <i class="fas fa-eject"></i>
+            </button>
+        </div>
+        <div id="drivea-programs" class="tape-programs drive-programs" style="display:none"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         HIDDEN ENGINE HOOKS
+         The emulator JS engine requires these elements to be present in the
+         DOM even when they are not displayed. Do not remove them.
+    ════════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Status (read by engine) -->
+    <span id="status" style="display:none">Prêt</span>
+
+    <!-- Snapshot hooks -->
+    <input  type="file"   id="snapshot-input"     style="display:none" accept=".sna,.zip">
+    <span   id="snapshot-filename"                style="display:none"></span>
+    <select id="snapshot-zipselect"               style="display:none"></select>
+    <button id="snapshot-capture"                 style="display:none"></button>
+    <button id="snapshot-eject"                   style="display:none"></button>
+
+    <!-- Drive B hooks -->
+    <div id="fieldset-driveb" style="display:none">
+        <input  type="file"   id="driveb-input"   accept=".dsk,.zip">
+        <span   id="driveb-filename"></span>
+        <select id="driveb-zipselect"></select>
+        <button id="driveb-new"></button>
+        <button id="driveb-eject"></button>
+        <div    id="driveb-programs"></div>
+    </div>
+
+    <!-- Tape hooks -->
+    <div id="fieldset-tape" style="display:none">
+        <input  type="file"   id="tape-input"     accept=".cdt,.wav,.zip">
+        <span   id="tape-filename"></span>
+        <span   id="tape-counter"></span>
+        <span   id="tape-motor-status"></span>
+        <button id="tape-eject"></button>
+        <button id="tape-new"></button>
+        <button id="tape-save"></button>
+        <button id="tape-record"></button>
+        <button id="tape-rewind"></button>
+        <button id="tape-stop"></button>
+        <button id="tape-play"></button>
+        <button id="tape-forward"></button>
+        <div    id="tape-programs"></div>
+    </div>
+
+    <!-- Cartridge hooks (CPC+) -->
+    <div id="fieldset-cart" style="display:none">
+        <input  type="file"   id="cart-input"     accept=".cpr,.zip">
+        <span   id="cart-filename"></span>
+        <select id="cart-zipselect"></select>
+        <button id="cart-eject"></button>
+    </div>
+
+    <!-- Printer hook -->
+    <div id="printer-card" style="display:none">
+        <div id="printer-output"></div>
+        <button id="printer-toggle"></button>
+        <button id="printer-clear"></button>
+    </div>
+
+    <!-- AutoType hooks -->
+    <textarea id="autotype-area"  style="display:none"></textarea>
+    <button   id="autotype-send"  style="display:none"></button>
+    <button   id="autotype-clear" style="display:none"></button>
+
+    <!-- Toolbar hooks the engine wires up (hidden in this template) -->
+    <button id="button-step"      style="display:none"></button>
+    <button id="button-stepover"  style="display:none"></button>
+    <button id="button-turbo"     style="display:none"></button>
+    <button id="checkbox-sound"   style="display:none" class="active"></button>
+    <button id="checkbox-joystick" style="display:none" class="active"></button>
+    <button id="checkbox-settings" style="display:none"></button>
+    <button id="checkbox-fullscreen" style="display:none"></button>
+    <input  type="range" id="sound-volume" value="75" style="display:none">
+
+    <!-- Settings modal (engine reads these radios/checkboxes) -->
+    <div id="option-panel-overlay" style="display:none"></div>
+    <div id="option-panel"         style="display:none">
+        <button id="settings-close"></button>
+        <div class="config-grid">
+            <div>
+                <input type="radio" name="brand"    value="amstrad"  checked>
+                <input type="radio" name="brand"    value="schneider">
+                <input type="radio" name="brand"    value="awa">
+            </div>
+            <div>
+                <input type="radio" name="firmware" value="english" checked>
+                <input type="radio" name="firmware" value="french">
+                <input type="radio" name="firmware" value="spanish">
+            </div>
+            <div>
+                <input type="radio" name="monitor"  value="colour"   checked>
+                <input type="radio" name="monitor"  value="green">
+                <input type="radio" name="monitor"  value="grayscale">
+            </div>
+            <div>
+                <input type="radio" name="audio"    value="stereo" checked>
+                <input type="radio" name="audio"    value="mono">
+            </div>
+            <div>
+                <input type="radio" name="crtc"     value="type0">
+                <input type="radio" name="crtc"     value="type1" checked>
+                <input type="radio" name="crtc"     value="type2">
+                <input type="radio" name="crtc"     value="type3">
+            </div>
+            <div>
+                <input type="checkbox" id="autorun-option" checked>
+                <input type="checkbox" id="ram-option">
+                <input type="checkbox" id="floppy-option"  checked>
+                <input type="checkbox" id="tape-option"    checked>
+            </div>
+        </div>
+    </div>
+    <!-- ── Z80 register hooks (engine writes to these) ───────────────────── -->
+    <span id="regAF" style="display:none"></span>
+    <span id="regBC" style="display:none"></span>
+    <span id="regDE" style="display:none"></span>
+    <span id="regHL" style="display:none"></span>
+    <span id="regIX" style="display:none"></span>
+    <span id="regIY" style="display:none"></span>
+    <span id="regSP" style="display:none"></span>
+    <span id="regPC" style="display:none"></span>
+    <span id="z80_flags" style="display:none"></span>
+
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "js-cpc-engine",
+  "version": "1.0.0",
+  "description": "High-performance Amstrad CPC/CPC+/GX4000 emulator core (ZEXALL ready, WebGPU)",
+  "main": "src/core/system/Emulator_Core.js",
+  "keywords": ["emulator", "amstrad", "cpc", "z80", "webgpu", "retrocomputing"],
+  "author": "Thierry",
+  "license": "MIT"
+}
