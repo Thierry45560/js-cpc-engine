@@ -1,5 +1,3 @@
-Voici une proposition de **README.md** complet, professionnel et percutant pour ton dépôt GitHub. Il est conçu pour mettre en valeur la technicité de ton travail (précision ZEXALL + performance WebGPU).
-
 ---
 
 # JS-CPC Engine 🚀
