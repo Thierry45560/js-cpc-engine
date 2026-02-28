@@ -1,5 +1,3 @@
----
-
 # JS-CPC Engine 🚀
 ### High-Performance Amstrad CPC / CPC+ / GX4000 Emulator Core
 
