@@ -101,8 +101,18 @@ Emulator_Core.updateFps = function () {
     // ── Plein écran ───────────────────────────────────────────
     UI_Manager.bindFullscreen();
 
-    // ── Imprimante virtuelle ──────────────────────────────────
+    // ── Imprimante virtuelle ───────────────────────────────────
+    //
+    // La carte était masquée (`display:none`) jusqu'au premier caractère
+    // imprimé, ce qui la rendait invisible : rien ne signalait à l'utilisateur
+    // que le port parallèle existait, et une LPRINT « muette » passait pour un
+    // défaut de l'émulateur. Elle est désormais visible en permanence, et
+    // `clear()` ne la referme plus — un clic sur « Vider » doit effacer le
+    // contenu, pas faire disparaître le périphérique.
     UI_Manager.bindPrinter();
+    // Affiche « En attente d'une impression… » : une zone vide se lit comme un
+    // port parallèle non câblé.
+    if (typeof VirtualPrinter !== 'undefined') VirtualPrinter.init();
 
     /* ── Vérification JSZip ───────────────────────────────────── */
     if (typeof JSZip === 'undefined') {

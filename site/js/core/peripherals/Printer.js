@@ -34,6 +34,13 @@ const VirtualPrinter = {
     _card()   { return document.getElementById('printer-card');   },
 
     /**
+     * Affiche l'état d'attente initial.
+     * Appelé au démarrage de la page, une fois le DOM prêt.
+     * @returns {void}
+     */
+    init() { this._showIdle(); },
+
+    /**
      * Returns the printer output container element, or null if absent.
      * @returns {HTMLElement|null}
      */
@@ -49,9 +56,25 @@ const VirtualPrinter = {
     readPort(_addr) { return 0; },
 
     /**
+     * Rend l'état « en attente d'une impression ».
+     *
+     * La carte est visible en permanence, mais une zone vide ne dit pas à
+     * l'utilisateur si le port parallèle est câblé ou non : l'absence de
+     * tout texte se lit comme un défaut. Ce rappel distingue « rien n'a encore
+     * été imprimé » de « l'imprimante ne répond pas ».
+     */
+    _showIdle() {
+        const output = this._output();
+        if (!output || output.querySelector('.printer-line')) return;
+        const attente = document.createElement('div');
+        attente.className = 'printer-idle';
+        attente.textContent = 'En attente d\'une impression…';
+        output.appendChild(attente);
+    },
+
+    /**
      * Renders a completed line of text to the DOM output element,
      * or logs it to the browser console if the DOM element is absent.
-     * Reveals the printer card on first output.
      * Automatically scrolls to the latest line.
      * @param {string} text - Line content to display.
      */
@@ -66,8 +89,8 @@ const VirtualPrinter = {
             return;
         }
 
-        const card = this._card();
-        if (card && card.style.display === 'none') card.style.display = '';
+        // La première impression remplace l'état d'attente.
+        output.querySelector('.printer-idle')?.remove();
 
         const line = document.createElement('div');
         line.className = 'printer-line';
@@ -78,14 +101,18 @@ const VirtualPrinter = {
     },
 
     /**
-     * Clears the print buffer, removes all output lines, and hides the card.
+     * Clears the print buffer and removes all output lines.
+     *
+     * The printer card itself stays visible: this button clears the listing,
+     * it does not unplug the device. Hiding it here meant a single mis-click
+     * on « Vider » silently removed the panel, with no way back other than a
+     * reload — and the user had no way to tell that from a missing peripheral.
      */
     clear() {
         this.buffer = "";
         const output = this._output();
         if (output) output.innerHTML = '';
-        const card = this._card();
-        if (card) card.style.display = 'none';
+        this._showIdle();
     },
 
     /**
