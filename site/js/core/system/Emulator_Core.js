@@ -14,31 +14,15 @@
  * Dependencies:
  *   Config_Manager, CPU_Z80, Palette_Colors, Display_Sync_Manager,
  *   CRTC_Manager, IO_Manager, TapeController, Audio_Output,
- *   ASIC_DMA_Controller, Machine_Type (global), statusElement (global),
- *   emulationLoopTimer (global), fpsUpdateTimer (global)
+ *   ASIC_DMA_Controller, Machine_Type (global), window.statusElement (global)
  */
 
 // ---------------------------------------------------------------------------
 // Main-loop state variables
 // ---------------------------------------------------------------------------
 
-/** @type {number} Handle returned by setInterval for the FPS refresh callback. */
-let fpsUpdateTimer;
-
-/** @type {number} Handle returned by setInterval for the main emulation callback. */
-let emulationLoopTimer;
-
-/** @type {HTMLElement} Status bar element displaying "Running @ N fps" or "Paused". */
-let statusElement;
-
 /** Whether the emulator is paused. */
 let isPaused = true;
-
-/**
- * @type {number} Active machine model.
- * Values: 0=CPC 464, 1=CPC 664, 2=CPC 6128, 4=CPC 6128+, 5=CPC 464+.
- */
-let Machine_Type;
 
 /**
  * @type {Set<string>} Snapshot IDs that represent a clean boot (no SNA to load).
@@ -171,9 +155,6 @@ function toggleTurbo() {
 // Emulator_Core
 // ---------------------------------------------------------------------------
 
-/** @type {Function|null} Click handler for the Run/Pause button. */
-let _runClickHandler = null;
-
 /** @type {number|null} Handle for the main emulation loop interval. */
 let _emulationLoopTimer = null;
 
@@ -181,6 +162,19 @@ let _emulationLoopTimer = null;
 let _fpsUpdateTimer = null;
 
 const Emulator_Core = {
+
+  /**
+   * Vrai si l'émulateur est en pause. Lu par le bouton Run/Pause de la
+   * toolbar pour choisir entre `resumeEmulator()` et `pauseEmulator()`.
+   *
+   * Why a getter and not a plain flag: `Object.seal()` interdit d'ajouter une
+   * propriété après le démarrage. Un accesseur déclaré dans le littéral existe
+   * dès le scellement, et délègue vers la variable module-level — c'est donc le
+   * seul moyen d'exposer cet état à `UI_DOM.js` sans casser le seal.
+   *
+   * @returns {boolean} true si en pause, false si en marche.
+   */
+  get isPaused() { return isPaused; },
 
   /** @type {number} Accumulated T-state count since the last reset. */
   tStates: 0,
@@ -363,20 +357,13 @@ const Emulator_Core = {
   /**
    * Pauses emulation: stops the CPU loop and FPS timer, updates the UI, and
    * optionally opens the debugger if its checkbox is active.
-   */  pauseEmulator() {
+   */
+  pauseEmulator() {
     Config_Manager.turboMode = false;
 
     const run = document.querySelector("#button-run");
     if (run) {
       run.innerHTML = '<i class="fas fa-play"></i> Run';
-      // Remove old listener and add new one
-      if (_runClickHandler) {
-        run.removeEventListener('click', _runClickHandler);
-      }
-      _runClickHandler = function () {
-        if (this.classList.contains("button")) Emulator_Core.resumeEmulator();
-      };
-      run.addEventListener('click', _runClickHandler);
     }
 
     document.querySelectorAll("#button-run, #button-reset, #button-step, #button-stepover")
@@ -388,6 +375,7 @@ const Emulator_Core = {
     turboStop();
     if (_emulationLoopTimer) { clearInterval(_emulationLoopTimer); _emulationLoopTimer = null; }
     if (_fpsUpdateTimer) { clearInterval(_fpsUpdateTimer); _fpsUpdateTimer = null; }
+    isPaused = true;
     window.statusElement.innerHTML = "Paused";
 
     launch_debugger();
