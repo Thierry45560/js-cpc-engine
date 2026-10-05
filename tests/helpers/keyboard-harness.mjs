@@ -111,6 +111,10 @@ export function fauxDom() {
     getElementById: () => null,
     querySelector: () => null,
     addEventListener: target.addEventListener,
+    // `Keyboard._isHostInputFocused()` interroge `document.activeElement` pour
+    // savoir si une frappe est destinée à l'hôte (zone Auto-Type) ou au CPC.
+    // `null` = aucun champ de saisie focalisé, ce qui est le cas par défaut.
+    activeElement: null,
   };
   return { document: doc, window: target, listeners };
 }
@@ -146,6 +150,15 @@ export function clavierPret(lang = 'US') {
     kb: keyboard,
     autoType,
     dom,
+    /**
+     * Place le focus sur un champ de saisie de l'hôte (textarea Auto-Type).
+     * @param {boolean} actif true pour focaliser, false pour rendre la page.
+     */
+    focusSaisie(actif = true) {
+      dom.document.activeElement = actif
+        ? { tagName: 'TEXTAREA' }
+        : null;
+    },
     /** Restaure le DOM global — à appeler dans un `afterEach`. */
     restaure() {
       globalThis.document = saved.document;

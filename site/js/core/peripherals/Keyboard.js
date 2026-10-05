@@ -182,7 +182,43 @@ const CPC_INPUT = (() => {
             return this.matrix[row];
         }
 
+        /**
+         * Le focus clavier est-il dans un champ de saisie de l'HÔTE ?
+         *
+         * La page comporte une zone Auto-Type (`<textarea>`) et divers champs
+         * texte. Tant que l'un d'eux a le focus, les frappes appartiennent à
+         * l'hôte : les injecter dans la matrice ferait double emploi — le
+         * caractère appearrait à la fois dans le textarea et sur l'écran du CPC.
+         *
+         * On interroge `document.activeElement` à chaque événement plutôt que de
+         * maintenir un drapeau posé par des écouteurs `focus`/`blur` : l'état
+         * est ainsi toujours juste, y compris si un autre script change le focus
+         * sans passer par nos écouteurs.
+         *
+         * @returns {boolean} true si le focus est dans un champ éditable.
+         */
+        _isHostInputFocused() {
+            const noeud = document.activeElement;
+            if (!noeud) return false;
+            return noeud.tagName === "TEXTAREA"
+                || noeud.tagName === "INPUT"
+                || noeud.isContentEditable === true;
+        }
+
         keydownEvent(event) {
+            // Le focus est dans un champ de saisie : on ne touche ni à la
+            // matrice ni au `preventDefault`. Neutraliser les touches critiques
+            // ici rendait les flèches et le retour arrière inertes dans le
+            // textarea — c'est-à-dire exactement là où l'utilisateur écrit son
+            // code BASIC.
+            if (this._isHostInputFocused()) {
+                // Une touche peut rester enfoncée au moment où le focus bascule
+                // (on tape « A » puis on clique dans le textarea). Sans ce
+                // relâchement, le firmware ne recevrait jamais le `keyup` et la
+                // touche resterait bloquée à jamais.
+                if (this._pressedPositions.size > 0) this.releaseAll();
+                return;
+            }
             if (Keyboard.CRITICAL_CODES.has(event.code)) event.preventDefault();
             if (this._pressedPositions.has(event.code)) return;
             const pos = this.translateCode(event.code);
@@ -193,6 +229,9 @@ const CPC_INPUT = (() => {
         }
 
         keyupEvent(event) {
+            // Symétrique du `keydown` : si le focus est parti vers un champ de
+            // saisie, ce relâchement concerne l'hôte, pas le CPC.
+            if (this._isHostInputFocused()) return;
             if (Keyboard.CRITICAL_CODES.has(event.code)) event.preventDefault();
             const pos = this._pressedPositions.get(event.code);
             if (!pos) return;
@@ -227,8 +266,17 @@ const CPC_INPUT = (() => {
         }
     }
 
+    // Touches dont l'action native du navigateur contrarie le CPC, et qu'il
+    // faut donc neutraliser.
+    //
+    // `AltLeft`/`AltRight` y figurent parce que ALT est la touche CAPS du CPC
+    // (ligne 1, bit 1) : sans `preventDefault`, le navigateur traite l'appui
+    // comme un modificateur système et retire le focus de la page — on perdait
+    // le focus du textarea Auto-Type et de l'élément actif dès que l'on
+    // pressait ALT pour taper une chaîne accentuée.
     Keyboard.CRITICAL_CODES = new Set([
         "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Tab", "Backspace",
+        "AltLeft", "AltRight",
         ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`),
     ]);
 

@@ -707,10 +707,18 @@ describe('Keyboard — événements', () => {
     }
   });
 
-  it('annule par défaut uniquement flèches, Espace, Tab, F1-F12 et Backspace', () => {
+  it('annule par défaut flèches, Espace, Tab, F1-F12, Backspace et ALT', () => {
     ctx = clavierPret('US');
-    const codes = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab', 'F1', 'F12', 'Backspace'];
+    const codes = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab',
+      'F1', 'F12', 'Backspace'];
     for (const code of codes) {
+      const event = evenement(code);
+      ctx.kb.keydownEvent(event);
+      expect(event.defaultPrevented, code).toBe(true);
+    }
+    // ALT est la touche CAPS du CPC (1:1) : sans `preventDefault` le navigateur
+    // le traite comme modificateur système et retire le focus de la page.
+    for (const code of ['AltLeft', 'AltRight']) {
       const event = evenement(code);
       ctx.kb.keydownEvent(event);
       expect(event.defaultPrevented, code).toBe(true);
@@ -771,6 +779,81 @@ describe('Keyboard — modificateurs', () => {
     ctx.kb.keydownEvent(evenement('ControlLeft'));
     expect(ctx.kb.modifiers.ctrl).toBe(true);
     expect(ctx.kb.matrix[9]).toBe(0xFF & ~16);   // JOY_FIRE1
+  });
+});
+
+describe('Keyboard — zone de saisie Auto-Type', () => {
+  let ctx;
+
+  afterEach(() => { if (ctx) ctx.restaure(); });
+
+  it('n\'injecte rien dans la matrice quand le focus est dans le textarea', () => {
+    // Le textarea Auto-Type et l'écran du CPC se disputeraient le même
+    // caractère : taper « 10 PRINT » y inserait « 10 PRINT » dans le BASIC
+    // *et* sur l'écran de l'émulateur.
+    ctx = clavierPret('US');
+    ctx.focusSaisie(true);
+
+    ctx.kb.keydownEvent(evenement('KeyA'));
+    ctx.kb.keydownEvent(evenement('Digit1'));
+    ctx.kb.keyupEvent(evenement('KeyA'));
+
+    expect(Array.from(ctx.kb.getMatrix())).toEqual(new Array(10).fill(0xFF));
+  });
+
+  it('laisse les flèches et le retour arrière à l\'hôte', () => {
+    // C'est le défaut le plus visible : dans le textarea, les flèches
+    // déplaçaient le curseur vers le haut et le retour arrière effaçait le
+    // caractère précédent, parce que `preventDefault()` neutralisait des
+    // touches dont le firmware n'a rien à faire.
+    ctx = clavierPret('US');
+    ctx.focusSaisie(true);
+
+    for (const code of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace']) {
+      const event = evenement(code);
+      ctx.kb.keydownEvent(event);
+      expect(event.defaultPrevented, code).toBe(false);
+    }
+  });
+
+  it('reprend l\'injection dès que le focus quitte le textarea', () => {
+    ctx = clavierPret('US');
+    ctx.focusSaisie(true);
+    ctx.kb.keydownEvent(evenement('KeyA'));
+    expect(ctx.kb.matrix[8]).toBe(0xFF);
+
+    ctx.focusSaisie(false);
+    ctx.kb.keydownEvent(evenement('KeyA'));
+    expect(ctx.kb.matrix[8]).toBe(0xFF & ~32);
+  });
+
+  it('relâche les touches déjà enfoncées quand le focus bascule', () => {
+    // On tape « A » puis on clique dans le textarea : le `keyup` ne viendra
+    // plus (le CPC a déjà reçu l'appui, l'hôte reçoit le relâchement). Sans
+    // relâchement forcé ici, la touche resterait bloquée à jamais.
+    ctx = clavierPret('US');
+    ctx.kb.keydownEvent(evenement('KeyA'));
+    expect(ctx.kb.matrix[8]).not.toBe(0xFF);
+
+    ctx.focusSaisie(true);
+    ctx.kb.keydownEvent(evenement('KeyB'));
+
+    expect(Array.from(ctx.kb.getMatrix())).toEqual(new Array(10).fill(0xFF));
+  });
+
+  it('neutralise ALT pour ne pas perdre le focus de la page', () => {
+    // ALT est la touche CAPS du CPC (1:1). Le navigateur le traitant comme
+    // modificateur système, la page perdait le focus dès le premier appui.
+    ctx = clavierPret('US');
+    ctx.focusSaisie(false);
+
+    const event = evenement('AltLeft');
+    ctx.kb.keydownEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+
+    // La touche reste bien injectée côté CPC : neutraliser l'action navigateur
+    // ne doit pas empêcher la matrice de voir l'appui.
+    expect(ctx.kb.matrix[1] & (1 << 1)).toBe(0);
   });
 });
 
