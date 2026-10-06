@@ -957,7 +957,13 @@ const UI_Manager = {
     // -------------------------------------------------------------------------
 
     /**
-     * Wires the AutoType send and clear buttons.
+     * Câble les boutons d'envoi et de vidage de la zone Auto-Type, ainsi que le
+     * choix du mode.
+     *
+     *   - `clavier` (défaut) : le listing est frappé touche par touche, le
+     *     firmware tokenise et gère lui-même la mémoire ;
+     *   - `memoire` : le listing est tokenisé côté PC et écrit tel quel à &0170.
+     *     Instantané, mais le programme présent est écrasé.
      *
      * @returns {void}
      */
@@ -965,14 +971,113 @@ const UI_Manager = {
         brancher(document.querySelector('#autotype-send'), 'click', function () {
             const code = document.querySelector('#autotype-area')?.value;
             if (!code) return;
+            if (UI_Manager._modeAutotype() === 'memoire') {
+                UI_Manager._transfererEnMemoire(code);
+                return;
+            }
             CPC_INPUT.keyboard.autotype(code + '\r');
         });
+
+        UI_Manager._brancherModesAutotype();
 
         brancher(document.querySelector('#autotype-clear'), 'click', function () {
             CPC_INPUT.keyboard.cancelAutotype();
             const zone = document.querySelector('#autotype-area');
             if (zone) zone.value = '';
+            UI_Manager._noteAutotype('', '');
         });
+    },
+
+    /**
+     * Mode d'envoi choisi dans la carte Auto-Type.
+     * @returns {string} `clavier` (défaut) ou `memoire`.
+     */
+    _modeAutotype() {
+        const coche = document.querySelector('input[name=autotype-mode]:checked');
+        return coche ? coche.value : 'clavier';
+    },
+
+    /**
+     * Écoute les boutons radio du mode et aligne le libellé du bouton.
+     * Sans effet sur les pages qui n'ont pas ces contrôles : game.html garde le
+     * seul mode clavier, utilisé par l'auto-run.
+     * @returns {void}
+     */
+    _brancherModesAutotype() {
+        document.querySelectorAll('input[name=autotype-mode]').forEach(function (radio) {
+            brancher(radio, 'change', function () { UI_Manager._majModeAutotype(); });
+        });
+        UI_Manager._majModeAutotype();
+    },
+
+    /**
+     * Adapte le libellé du bouton d'envoi au mode choisi.
+     * @returns {void}
+     */
+    _majModeAutotype() {
+        const libelle = document.querySelector('#autotype-send-label');
+        if (libelle) {
+            libelle.textContent = (UI_Manager._modeAutotype() === 'memoire')
+                ? 'Transférer en mémoire'
+                : 'Injecter dans le CPC';
+        }
+        UI_Manager._noteAutotype('', '');
+    },
+
+    /**
+     * Écrit un message sous le bouton Auto-Type (résultat du dernier envoi).
+     * @param {string} texte  Message ; chaîne vide pour effacer.
+     * @param {string} classe `ok`, `erreur`, ou chaîne vide.
+     * @returns {void}
+     */
+    _noteAutotype(texte, classe) {
+        const note = document.querySelector('#autotype-note');
+        if (!note) return;
+        note.textContent = texte;
+        note.className = 'autotype-note' + (classe ? ' ' + classe : '');
+    },
+
+    /**
+     * Transfère un listing BASIC directement en mémoire (&0170) au lieu de le
+     * frapper touche par touche.
+     *
+     * Le programme présent et ses variables sont écrasés : d'où la confirmation
+     * explicite. Rien n'est exécuté automatiquement — l'utilisateur tape RUN ou
+     * LIST, ce qui lui laisse le choix et évite de lancer un listing à moitié
+     * vérifié.
+     *
+     * @param {string} source Listing ASCII saisi dans la zone Auto-Type.
+     * @returns {void}
+     */
+    _transfererEnMemoire(source) {
+        if (typeof BasicTokenizer === 'undefined' || typeof ROM_Manager === 'undefined') {
+            UI_Manager._noteAutotype('Transfert mémoire indisponible.', 'erreur');
+            return;
+        }
+
+        const avertissement = 'Le transfert mémoire écrase le programme BASIC et ses '
+            + 'variables. Continuer ?';
+        if (!window.confirm(avertissement)) return;
+
+        const resultat = BasicTokenizer.injecter(
+            source,
+            Machine_Type,
+            function (adresse, valeur) { ROM_Manager.writeMemory(adresse, valeur); },
+        );
+
+        if (!resultat.ok) {
+            const erreur = resultat.erreurs[0];
+            UI_Manager._noteAutotype(
+                'Échec' + (erreur.ligne ? ' ligne ' + erreur.ligne : '') + ' : ' + erreur.message,
+                'erreur',
+            );
+            return;
+        }
+
+        UI_Manager._noteAutotype(
+            resultat.lignes + ' ligne(s), ' + resultat.octets + ' octets — tapez RUN ou LIST',
+            'ok',
+        );
     },
 
     // -------------------------------------------------------------------------

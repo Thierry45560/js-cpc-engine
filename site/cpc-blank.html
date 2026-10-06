@@ -37,6 +37,7 @@
     <script src="js/tools/Tools_Formatters.js"></script>
     <script src="js/tools/ZipTools.js"></script>
     <script src="js/tools/Z80Disassembler.js"></script>
+    <script src="js/tools/BasicTokenizer.js"></script>
 
     <!-- 2. Adapteurs de rendu (Nécessaires pour l'affichage) -->
     <script src="js/adapters/graphics/WebGPURenderer.js"></script>
@@ -193,9 +194,24 @@
                     <button id="autotype-clear" class="btn-text">Vider</button>
                 </div>
                 <textarea id="autotype-area" placeholder="Collez votre code ici... (ex: 10 PRINT 'HELLO')"></textarea>
+
+                <!-- Deux façons d'entrer le listing : le frapper touche par touche
+                     (le firmware tokenise), ou tokeniser côté PC et l'écrire
+                     directement en mémoire. Le second est instantané mais
+                     écrase le programme présent — l'avertissement est dans
+                     UI_DOM, au moment du clic. -->
+                <div class="autotype-modes">
+                    <label><input type="radio" name="autotype-mode" value="clavier" checked>
+                        Auto-type clavier</label>
+                    <label><input type="radio" name="autotype-mode" value="memoire">
+                        Transfert mémoire</label>
+                </div>
+
                 <button id="autotype-send" class="btn-action">
-                    Injecter dans le CPC <i class="fas fa-paper-plane"></i>
+                    <span id="autotype-send-label">Injecter dans le CPC</span>
+                    <i class="fas fa-paper-plane"></i>
                 </button>
+                <p class="autotype-note" id="autotype-note"></p>
             </div>
 
             <!-- Imprimante virtuelle — visible en permanence : le port parallèle est
