@@ -309,6 +309,22 @@ body {
     text-align: center; padding: 5px;
     font-family: monospace; border-radius: 4px;
 }
+
+/* Désassemblage sous les registres : une ligne = adresse + octets + mnémonique */
+.disasm-title {
+    margin-top: 10px; color: var(--text-muted);
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.disasm {
+    background: #000; border: 1px solid #334155; border-radius: 4px;
+    padding: 6px 8px; font-family: 'Courier New', monospace;
+    font-size: 0.75rem; line-height: 1.5; color: #e2e8f0;
+}
+.disasm-ligne    { white-space: nowrap; }
+.disasm-ligne:first-child { color: #5eead4; }  /* instruction courante */
+.disasm-adresse   { color: #64748b; }
+.disasm-octets    { color: #fbbf24; margin: 0 6px; }
+.disasm-texte     { color: inherit; }
 .psg-regs {
     display: grid; grid-template-columns: 1fr 1fr;
     gap: 10px; font-size: 0.8rem;

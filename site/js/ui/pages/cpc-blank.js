@@ -40,7 +40,31 @@ if (typeof CPU_Z80 !== 'undefined') {
             (f & 0x04 ? 'P' : '-') +
             (f & 0x02 ? 'N' : '-') +
             (f & 0x01 ? 'C' : '-');
+        // Désassemblage des instructions qui commencent à PC
+        majDesassemblage(this.regPC);
     };
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Affichage du code désassemblé à l'adresse PC
+   ───────────────────────────────────────────────────────────── */
+function majDesassemblage(adresse) {
+    var cible = document.getElementById('z80_disasm');
+    if (!cible || typeof Z80Disassembler === 'undefined') return;
+    var lignes = Z80Disassembler.desassembler(
+        function (a) { return ROM_Manager.readMemory(a); },
+        adresse,
+        8
+    );
+    var html = '';
+    for (var i = 0; i < lignes.length; i++) {
+        html += '<div class="disasm-ligne">' +
+                '<span class="disasm-adresse">' + toHex16(lignes[i].adresse) + '</span>' +
+                '<span class="disasm-octets">' + lignes[i].octets + '</span>' +
+                '<span class="disasm-texte">' + lignes[i].texte + '</span>' +
+                '</div>';
+    }
+    cible.innerHTML = html;
 }
 
 /* ─────────────────────────────────────────────────────────────

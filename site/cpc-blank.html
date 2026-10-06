@@ -36,6 +36,7 @@
     <!-- 1. Utilitaires & Outils (Indépendants) -->
     <script src="js/tools/Tools_Formatters.js"></script>
     <script src="js/tools/ZipTools.js"></script>
+    <script src="js/tools/Z80Disassembler.js"></script>
 
     <!-- 2. Adapteurs de rendu (Nécessaires pour l'affichage) -->
     <script src="js/adapters/graphics/WebGPURenderer.js"></script>
@@ -148,6 +149,10 @@
                     <div class="reg-item"><span>PC</span><b id="regPC">0000</b></div>
                 </div>
                 <div class="flags-bar" id="z80_flags">00000000</div>
+
+                <!-- Désassemblage des instructions à partir de PC -->
+                <div class="disasm-title">Code à @PC</div>
+                <div class="disasm" id="z80_disasm"></div>
             </div>
 
             <!-- Snapshot Loader -->
