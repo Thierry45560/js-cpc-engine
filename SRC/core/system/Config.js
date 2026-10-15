@@ -9,11 +9,11 @@
  *   1. Utils.js          — setCookie, getCookie, startTimer, throwError
  *   2. Config.js         — this file
  *   3. Emulator_Core.js  — main emulation loop
- *   4. Emulator_Setup.js — AppMain + $(document).ready bootstrap
+ *   4. Emulator_Setup.js — AppMain + bootstrap DOMContentLoaded
  *
  * Dependencies:
  *   Reads  : setCookie, getCookie (Utils.js globals)
- *   Calls  : Floppy_Drive_A/B, Keyboard_Manager, ROM_Manager, Video_Hardware,
+ *   Calls  : Floppy_Drive_A/B, CPC_INPUT, ROM_Manager, Video_Hardware,
  *             Palette_Colors, Audio_Output, CRTC_Manager, Tape_Recorder,
  *             Memory_Manager, Config_Manager (self-reference for callbacks)
  */
@@ -68,16 +68,17 @@ const Config_Manager = {
    * Called when the user confirms the settings panel.
    */
   saveConfiguration() {
-    const radio = (name) => $(`input:radio[name=${name}]:checked`).val();
+    const radio = (name) => document.querySelector(`input[type=radio][name=${name}]:checked`)?.value;
+    const coche = (sel) => document.querySelector(sel)?.checked;
     setCookie("brand",    radio("brand"),    365);
     setCookie("firmware", radio("firmware"), 365);
     setCookie("monitor",  radio("monitor"),  365);
     setCookie("audio",    radio("audio"),    365);
     setCookie("crtc",     radio("crtc"),     365);
-    setCookie("floppy",   $("#floppy-option").is(":checked"), 365);
-    setCookie("tape",     $("#tape-option").is(":checked"),   365);
-    setCookie("ram",      $("#ram-option").is(":checked"),    365);
-    setCookie("sound",    Config_Manager.soundEnabled,        365);
+    setCookie("floppy",   coche("#floppy-option"), 365);
+    setCookie("tape",     coche("#tape-option"),   365);
+    setCookie("ram",      coche("#ram-option"),    365);
+    setCookie("sound",    Config_Manager.soundEnabled, 365);
   },
 
   /**
@@ -88,29 +89,42 @@ const Config_Manager = {
   loadConfiguration() {
     let val;
 
+    // Set the `checked` property (not the attribute): it is the real state
+    // of the control, even if the user already toggled it.
+    const cocher = (selecteur) => {
+      const radio = document.querySelector(selecteur);
+      if (radio) radio.checked = true;
+    };
+
     val = getCookie("brand");
     if (!["awa", "schneider", "amstrad"].includes(val)) val = "amstrad";
-    $(`input:radio[name=brand][value=${val}]`).attr("checked", true);
+    cocher(`input[type=radio][name=brand][value=${val}]`);
 
     val = getCookie("firmware");
-    if (!["english", "french", "spanish"].includes(val)) val = "spanish";
-    $(`input:radio[name=firmware][value=${val}]`).attr("checked", true);
+    if (!["english", "french", "spanish"].includes(val)) {
+      const detectedLayout = CPC_INPUT.detectLayoutFromNavigatorLanguage();
+      val = ({ US: "english", FR: "french", ES: "spanish" })[detectedLayout];
+    }
+    cocher(`input[type=radio][name=firmware][value=${val}]`);
 
     val = getCookie("monitor");
     if (!["colour", "green", "grayscale"].includes(val)) val = "colour";
-    $(`input:radio[name=monitor][value=${val}]`).attr("checked", true);
+    cocher(`input[type=radio][name=monitor][value=${val}]`);
 
     val = getCookie("audio");
     if (!["mono", "stereo"].includes(val)) val = "stereo";
-    $(`input:radio[name=audio][value=${val}]`).attr("checked", true);
+    cocher(`input[type=radio][name=audio][value=${val}]`);
 
     val = getCookie("crtc");
     if (!["type0", "type1", "type2", "type3"].includes(val)) val = "type1";
-    $(`input:radio[name=crtc][value=${val}]`).attr("checked", true);
+    cocher(`input[type=radio][name=crtc][value=${val}]`);
 
-    $("#floppy-option").attr("checked", getCookie("floppy") === "true");
-    $("#tape-option")  .attr("checked", getCookie("tape")   === "true");
-    $("#ram-option")   .attr("checked", getCookie("ram")    === "true");
+    const floppy = document.querySelector("#floppy-option");
+    const tape   = document.querySelector("#tape-option");
+    const ram    = document.querySelector("#ram-option");
+    if (floppy) floppy.checked = getCookie("floppy") === "true";
+    if (tape)   tape.checked   = getCookie("tape")   === "true";
+    if (ram)    ram.checked    = getCookie("ram")    === "true";
   },
 
   /**
@@ -125,15 +139,36 @@ const Config_Manager = {
    *   - 512 KB RAM expansion flag
    */
   applyConfiguration() {
+    const radio = (name) => document.querySelector(`input[type=radio][name=${name}]:checked`)?.value;
+    const visible = (sel) => (document.querySelector(sel)?.getClientRects().length ?? 0) > 0;
+
     const brandMap = { awa: 4, schneider: 5, amstrad: 7 };
-    const brand    = $("input:radio[name=brand]:checked").val();
+    const brand    = radio("brand");
     this.brandId   = brandMap[brand];
     if (this.brandId === undefined) alert("[Error] default case triggered in config_update()");
 
-    const firmware = $("input:radio[name=firmware]:checked").val();
+    const firmware = radio("firmware");
     if (["english", "french", "spanish"].includes(firmware)) {
+      // Firmware active before the change.
+      // Read before overwriting `this.language`, otherwise the comparison
+      // would always be equal and the reload would never happen.
+      const firmwareActif = this.language;
       this.language = firmware;
-      Keyboard_Manager.setLayout(firmware);
+      CPC_INPUT.keyboard.setLayout(({ english: "US", french: "FR", spanish: "ES" })[firmware]);
+
+      // Firmware change: write the cookie first, then reload the page so that
+      // the JavaScript context is rebuilt from scratch.
+      if (firmwareActif && firmwareActif !== firmware) {
+        setCookie("firmware", firmware, 365);
+
+        // Drop the ROM images cached by path so the new machine does not
+        // start again with the previous ones.
+        if (typeof window !== "undefined" && window.files) window.files = {};
+
+        location.reload();
+        return;
+      }
+
       ROM_Manager.loadROMs();
     } else {
       alert("[Error] default case triggered in config_update()");
@@ -144,13 +179,13 @@ const Config_Manager = {
       green:     Video_Hardware.paletteGreen,
       grayscale: Video_Hardware.paletteGray,
     };
-    const monitor = $("input:radio[name=monitor]:checked").val();
+    const monitor = radio("monitor");
     this.monitorPalette = paletteMap[monitor];
     if (!this.monitorPalette) alert("[Error] default case triggered in config_update()");
     this.updatePalette();
 
     const audioMap = { mono: Audio_Output.Mono, stereo: Audio_Output.Stereo };
-    const audio    = $("input:radio[name=audio]:checked").val();
+    const audio    = radio("audio");
     this.audioOutputFunction = audioMap[audio];
     if (!this.audioOutputFunction) alert("[Error] default case triggered in config_update()");
 
@@ -158,31 +193,35 @@ const Config_Manager = {
       type0: CRTC_Type0, type1: CRTC_Type1,
       type2: CRTC_Type2, type3: CRTC_Type3,
     };
-    const crtcType = $("input:radio[name=crtc]:checked").val();
+    const crtcType = radio("crtc");
     if (crtcMap[crtcType]) {
       CRTC_Manager.P(crtcMap[crtcType]);
     } else {
       alert("[Error] default case triggered in config_update()");
     }
 
-    if ($("#floppy-option").is(":checked")) {
+    if (document.querySelector("#floppy-option")?.checked) {
       Floppy_Drive_B.ready = true;
-      if ($("#fieldset-drivea").is(":visible")) $("#fieldset-driveb").show();
+      const b = document.querySelector("#fieldset-driveb");
+      if (visible("#fieldset-drivea") && b) b.style.display = '';
     } else {
       Floppy_Drive_B.ready = false;
-      $("#fieldset-driveb").hide();
+      const b = document.querySelector("#fieldset-driveb");
+      if (b) b.style.display = 'none';
     }
 
-    if ($("#tape-option").is(":checked")) {
+    if (document.querySelector("#tape-option")?.checked) {
       Tape_Recorder.ready = true;
-      if ($("#fieldset-drivea").is(":visible")) $("#fieldset-tape").show();
+      const t = document.querySelector("#fieldset-tape");
+      if (visible("#fieldset-drivea") && t) t.style.display = '';
     } else {
-      $("#tape-stop").click();
+      document.querySelector("#tape-stop")?.click();
       Tape_Recorder.ready = false;
-      $("#fieldset-tape").hide();
+      const t = document.querySelector("#fieldset-tape");
+      if (t) t.style.display = 'none';
     }
 
-    this.ramExpansion = $("#ram-option").is(":checked");
+    this.ramExpansion = document.querySelector("#ram-option")?.checked ?? false;
     Memory_Manager.ramExpansion = this.ramExpansion;
     ROM_Manager.ramExpansion    = this.ramExpansion;
     this.updateMemoryConfig();
@@ -277,8 +316,7 @@ const Config_Manager = {
    */
   updateFps() {
     const elapsed = getElapsedTime();
-    const fps     = Math.round(1000 * Video_Hardware.frameCounter / elapsed);
-    statusElement.innerHTML = Config_Manager.turboMode
+    const fps     = Math.round(1000 * Video_Hardware.frameCounter / elapsed);     window.statusElement.innerHTML = Config_Manager.turboMode
       ? `⚡ TURBO @ ${fps} fps`
       : `Running @ ${fps} fps`;
     Video_Hardware.frameCounter = 0;

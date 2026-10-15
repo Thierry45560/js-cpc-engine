@@ -8,7 +8,7 @@
  *   - Global utility functions: cookie helpers, elapsed-time timer, error handler.
  *   - AppMain: browser compatibility check, singleton sealing, subsystem init,
  *     ROM preload, and initial hard reset.
- *   - $(document).ready: DOM wiring, UI binding, synchronous bootstrap, then
+ *   - DOMContentLoaded: DOM wiring, UI binding, synchronous bootstrap, then
  *     an optional asynchronous WebGPU upgrade that does not block startup.
  *   - _installWebGPUAsync: post-boot WebGPU canvas overlay with size tracking.
  *
@@ -52,12 +52,6 @@ const getCookie = (name) => {
   }
   return null;
 };
-
-/**
- * Deletes a cookie by setting its expiry to the past.
- * @param {string} name - Cookie name.
- */
-const deleteCookie = (name) => setCookie(name, "", -1);
 
 /** @type {number} Timestamp (ms) recorded by the most recent startTimer() call. */
 let lastTimerTimestamp = 0;
@@ -118,33 +112,36 @@ const AppMain = {
   checkCompatibility() {
     const canvas = document.getElementById("screen");
     let ok = Video_Hardware.init(canvas);
+    const journal = () => document.querySelector("#error-log");
 
     if (typeof Object.seal === "undefined") {
-      $("#error-log").append("<p>Your browser doesn't support ECMAScript5.</p>");
+      journal()?.insertAdjacentHTML("beforeend", "<p>Your browser doesn't support ECMAScript5.</p>");
       ok = false;
     }
     if (typeof XMLHttpRequest === "undefined") {
-      $("#error-log").append("<p>Your browser doesn't support AJAX XMLHttpRequest.</p>");
+      journal()?.insertAdjacentHTML("beforeend", "<p>Your browser doesn't support AJAX XMLHttpRequest.</p>");
       ok = false;
     } else {
       const xhr = new XMLHttpRequest();
       if (typeof xhr.response === "undefined") {
-        $("#error-log").append("<p>Your browser doesn't support AJAX XMLHttpRequest Level2.</p>");
+        journal()?.insertAdjacentHTML("beforeend", "<p>Your browser doesn't support AJAX XMLHttpRequest Level2.</p>");
         ok = false;
       }
     }
     if (typeof FileReader === "undefined") {
-      $("#error-log").append("<p>Your browser doesn't support HTML5 File API.</p>");
+      journal()?.insertAdjacentHTML("beforeend", "<p>Your browser doesn't support HTML5 File API.</p>");
       ok = false;
     } else if (typeof new FileReader().readAsArrayBuffer === "undefined") {
-      $("#error-log").append("<p>Your browser doesn't support HTML5 File API: readAsArrayBuffer().</p>");
+      journal()?.insertAdjacentHTML("beforeend", "<p>Your browser doesn't support HTML5 File API: readAsArrayBuffer().</p>");
       ok = false;
     }
     if (!ok) {
-      $("#error-log")
-        .prepend("<div>JS CPC won't work on this browser:</div><ul>")
-        .append("</ul>")
-        .show();
+      const log = journal();
+      if (log) {
+        log.insertAdjacentHTML("afterbegin", "<div>JS CPC won't work on this browser:</div><ul>");
+        log.insertAdjacentHTML("beforeend", "</ul>");
+        log.style.display = '';
+      }
     }
     return ok;
   },
@@ -161,8 +158,8 @@ const AppMain = {
       ASIC_Manager, AppMain, IO_Manager, Video_Hardware, Config_Manager,
       Emulator_Core, CRTC_Manager, CRTC_Type0, CRTC_Type1, CRTC_Type2,
       CRTC_Type3, ASIC_DMA_Controller, PriManager, Palette_Colors,
-      Keyboard_Manager, ROM_Manager, Memory_Manager, CPR_Parser,
-      DSK_Parser, SNA_Parser, WAV_Parser, PPI_8255, InputExpansion,
+      CPC_INPUT, CPC_INPUT.keyboard, CPC_INPUT.inputExpansion, CPC_INPUT.autoType, ROM_Manager, Memory_Manager, CPR_Parser,
+      DSK_Parser, SNA_Parser, WAV_Parser, PPI_8255,
       PSG_Sound_AY38910, TapeController, Display_Sync_Manager,
       Audio_Output, CPU_Z80,
     ];
@@ -200,7 +197,7 @@ const AppMain = {
     ROM_Manager.loadROMs();
 
     if (!Config_Manager.debugMode) {
-      $(window).on("resize", () => UI_Manager.resizeCanvas());
+      window.addEventListener("resize", () => UI_Manager.resizeCanvas());
       UI_Manager.resizeCanvas();
     }
   },
@@ -221,28 +218,33 @@ const AppMain = {
     let lang = (typeof getCookie === "function") ? getCookie("firmware") : null;
     if (!["english", "french", "spanish"].includes(lang)) lang = "english";
 
-    let machine = $("#snapshot").val() || "boot_cpc6128";
+    const selecteur = document.querySelector("#snapshot");
+    let machine = selecteur?.value || "boot_cpc6128";
     if (!machine || machine === "none") machine = "boot_cpc6128";
-    $("#snapshot").val(machine);
+    if (selecteur) selecteur.value = machine;
 
     if (typeof DEFAULT_CRTC !== "undefined" && DEFAULT_CRTC[machine]) {
       const crtcVal = DEFAULT_CRTC[machine];
-      $("input:radio[name=crtc][value=" + crtcVal + "]").attr("checked", true).prop("checked", true);
+      const radio = document.querySelector("input[type=radio][name=crtc][value=" + crtcVal + "]");
+      if (radio) radio.checked = true;
     }
     if (machine === "boot_6128plus" || machine === "boot_464plus") {
-      $("#fieldset-cart").show();
+      const cart = document.querySelector("#fieldset-cart");
+      if (cart) cart.style.display = '';
     }
 
     const filesToLoad = (typeof getRomListForMachine === "function")
       ? getRomListForMachine(machine, lang) : [];
 
-    $("#status").text("Loading ROMs…");
+    const barre = document.querySelector("#status");
+    if (barre) barre.textContent = "Loading ROMs…";
     let loaded = 0;
 
     function onRomLoaded() {
       loaded++;
       if (loaded >= filesToLoad.length) {
-        $("#status").text("Starting…");
+        const b = document.querySelector("#status");
+        if (b) b.textContent = "Starting…";
         Emulator_Core.hardReset();
       }
     }
@@ -260,13 +262,14 @@ const AppMain = {
 // Bootstrap — synchronous startup followed by optional async WebGPU upgrade
 // ---------------------------------------------------------------------------
 
-$(document).ready(function () {
+(function () {
+    function demarrer() {
 
     UI_Manager.init();
 
     if (!AppMain.checkCompatibility()) return;
 
-    statusElement                = document.getElementById("status");
+    window.statusElement = document.getElementById("status");
     Floppy_Drive_A.ledElement    = document.getElementById("drivea-led");
     Floppy_Drive_B.ledElement    = document.getElementById("driveb-led");
     Tape_Recorder.counterElement = document.getElementById("tape-counter");
@@ -283,7 +286,7 @@ $(document).ready(function () {
     UI_Manager.bindCartridge();
 
     if (!Config_Manager.debugMode) {
-        $(window).on("resize", () => UI_Manager.resizeCanvas());
+            window.addEventListener("resize", () => UI_Manager.resizeCanvas());
         UI_Manager.resizeCanvas();
     }
 
@@ -294,10 +297,10 @@ $(document).ready(function () {
     // Asynchronous WebGPU upgrade — attempted after the emulator is running.
     //
     // Why after reset()?
-    //   _installWebGPUAsync is async (Promise-based). Making the document.ready
-    //   callback async would prevent jQuery from catching synchronous errors in
-    //   reset() and loadInitialRoms(). By deferring the WebGPU path we guarantee
-    //   Canvas 2D startup regardless of GPU availability.
+        //   _installWebGPUAsync is async (Promise-based). Making the boot function
+        //   async would move its errors into an unhandled promise rejection, so we
+        //   keep reset() and loadInitialRoms() synchronous. By deferring the WebGPU
+        //   path we guarantee Canvas 2D startup regardless of GPU availability.
     //
     // Why it works after Object.seal():
     //   seal() prevents new properties but allows existing ones to be mutated.
@@ -306,7 +309,16 @@ $(document).ready(function () {
     if (typeof WebGPURenderer !== "undefined" && navigator.gpu) {
         _installWebGPUAsync();
     }
-});
+    };
+
+    // Replacement for `$(document).ready(fn)`.
+    // `demarrer` is declared inside the IIFE, so the guard is placed here too.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', demarrer, { once: true });
+    } else {
+        demarrer();
+    }
+})();
 
 
 // ---------------------------------------------------------------------------
@@ -386,5 +398,11 @@ function _installWebGPUAsync() {
 
         syncSize();
         document.addEventListener("fullscreenchange", () => setTimeout(syncSize, 100));
+    }).catch(function (e) {
+        // Remove the overlay even when initialisation fails: a leftover
+        // `#screen-gpu` canvas would swallow the clicks on the page, and
+        // the fallback to Canvas 2D must always be available.
+        console.warn("[WebGPU] Initialisation impossible — Canvas 2D conservé : " + (e && e.message));
+        gpuCanvas.remove();
     });
 }

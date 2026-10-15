@@ -103,19 +103,32 @@ const DERNIERE_LIGNE_UTILE = 8;
  * - 0x09 (TAB) est la tabulation de la touche TAB.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * ET POURQUOI LES CARACTÈRES ACCENTUÉS N'EN SONT PAS
+ * LES CINQ ACCENTS FRANÇAIS DEMANDENT UNE RETOUCHE APRÈS EXTRACTION
  * ─────────────────────────────────────────────────────────────────────────────
- * Un point vérifié sur la ROM française, et contre-intuitif : SA TABLE NE
- * CONTIENT AUCUN ACCENT. Les octets 0x80-0x9F qu'on y trouve sont,UK comme
- * français, les mêmes touches de fonction — COPY, RETURN, ENTER — et non des
- * lettres accentuées.
+ * Ce script ne raisonne que sur des OCTETS, et c'est ce qui le rend aveugle
+ * aux accents du firmware FRANÇAIS.
  *
- * C'est fidèle au matériel : sur un CPC français, `é` ou `à` ne s'obtiennent
- * PAS au clavier. Il faut passer par le mode COPY, qui fait saisir le code
- * du caractère dans le générateur. Ce n'est donc pas une lacune de cette
- * extraction, et surtout pas une raison de les inventer dans la table : y
- * ajouter `é` → une position cualquiera produirait une faute de frappe, ce que
- * la règle « jamais tapé approximativement » interdit.
+ * Le générateur de caractères du CPC français ne réserve pas de codes aux
+ * accents : il SUBSTITUE le dessin de cinq glyphes ASCII. La table de
+ * traduction de la ROM rend donc `0x7B` pour la touche `é` — un octet qui se
+ * lit `{` mais qui s'AFFICHE `é` — et de même `0x7D` → `è`, `0x40` → `à`,
+ * `0x7C` → `ù`, `0x5C` → `ç`.
+ *
+ * Résultat : l'extraction étiquette ces positions `{`, `}`, `@`, `|` et `BS`,
+ * et les cinq accents — pourtant tapables au clavier — disparaîssent du table.
+ *
+ * ⚠️  CES CINQ POSITIONS SONT DONC ÉCRITES À LA MAIN dans `Keyboard.js`,
+ *     objet `FR_CHARACTER_TABLE` : `8:1` = `é`, `5:1` = `è`, `4:1` = `ç`,
+ *     `4:0` = `à`, `3:4` = `ù`. **Un nouveau passage de ce script les écrase.**
+ *     Après toute réextraction, comparer le bloc FR à `_MAP_FRENCH` de
+ *     `SRC/core/peripherals/Keyboard.js` (branche précédente, `git show`) :
+ *     c'est cette table historique qui fait foi pour les glyphes nationaux.
+ *
+ * Corollaire assumé : sur firmware français, `{`, `}`, `@`, `|` et `\` ne sont
+ * pas déclarés. Ils n'existent pas sur un CPC français — ce sont justement les
+ * cinq glyphes que le générateur remplace. Les réintroduire enverrait l'accent
+ * à la place du symbole : une faute de frappe, ce que la règle « jamais tapé
+ * approximativement » interdit.
  */
 const EXCEPTIONS_IMPRIMABLES = new Set([0x09, 0x0D]);
 

@@ -13,7 +13,7 @@
  *
  * External globals consumed:
  *   DSK_Parser, Floppy_Drive_A, Floppy_Drive_B,
- *   Emulator_Core, TapeController, AutoType (optional), window.files, jQuery ($)
+ *   Emulator_Core, TapeController, AutoType (optional), window.files
  */
 
 "use strict";
@@ -106,8 +106,11 @@ function mountBlankDSK(drive, filenameLbl, ejectId) {
     drive.isDirty        = false;
     drive.fileName       = name;
 
-    $(`#${filenameLbl}`).text(name + " (Vierge)");
-    $(`#${ejectId}`).removeClass('disabled-button').addClass('button');
+    const lbl = document.querySelector(`#${filenameLbl}`);
+    if (lbl) lbl.textContent = name + " (Vierge)";
+    const eject = document.querySelector(`#${ejectId}`);
+    eject?.classList.remove('disabled-button');
+    eject?.classList.add('button');
 }
 
 
@@ -216,19 +219,22 @@ function handleDiskUpload(file, drive, labelId, ejectId, displayId) {
         if (!parsedDisk) return;
 
         drive.diskImage = parsedDisk;
-        $(`#${labelId}`).text(file.name);
-        $(`#${ejectId}`).removeClass('disabled-button').addClass('button');
+        const lbl = document.querySelector(`#${labelId}`);
+        if (lbl) lbl.textContent = file.name;
+        const eject = document.querySelector(`#${ejectId}`);
+        eject?.classList.remove('disabled-button');
+        eject?.classList.add('button');
 
         const fileList = DSK_Parser.getDirectory(drive.diskImage);
         updateDiskDisplay(drive, displayId);
 
-        if ($('#autorun-option').is(':checked')) {
+        if (document.querySelector('#autorun-option')?.checked) {
             const target = getAutoRunTarget(fileList, file.name);
             if (target) {
                 console.log(`[Floppy] AutoRun → ${target}`);
                 setTimeout(function () {
-                    if (window.AutoType) {
-                        window.AutoType.inject(`RUN"${target}\r`);
+                    if (typeof CPC_INPUT !== 'undefined' && CPC_INPUT.keyboard) {
+                        CPC_INPUT.keyboard.autotype(`RUN"${target}\r`);
                     } else {
                         console.error('[Floppy] AutoType not available');
                     }
@@ -248,13 +254,16 @@ function handleDiskUpload(file, drive, labelId, ejectId, displayId) {
  * @returns {void}
  */
 function updateDiskDisplay(drive, containerId) {
-    const $container = $(`#${containerId}`);
-    if (!drive.diskImage) { $container.hide(); return; }
+    const conteneur = document.querySelector(`#${containerId}`);
+    if (!drive.diskImage) { if (conteneur) conteneur.style.display = 'none'; return; }
 
     const fileList = DSK_Parser.getDirectory(drive.diskImage);
 
     if (fileList.length === 0) {
-        $container.html('<div class="tape-analyzing">Catalogue vide ou inconnu</div>').show();
+        if (conteneur) {
+            conteneur.innerHTML = '<div class="tape-analyzing">Catalogue vide ou inconnu</div>';
+            conteneur.style.display = '';
+        }
         return;
     }
 
@@ -266,7 +275,10 @@ function updateDiskDisplay(drive, containerId) {
         </div>
     `).join('');
 
-    $container.html(html).show();
+    if (conteneur) {
+        conteneur.innerHTML = html;
+        conteneur.style.display = '';
+    }
 }
 
 
@@ -339,6 +351,10 @@ function getAutoRunTarget(files, dskFilename) {
 // DOM initialisation — delegates to UI_Manager
 // ---------------------------------------------------------------------------
 
-$(document).ready(function () {
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+        UI_Manager.bindFloppyDrives();
+    }, { once: true });
+} else {
     UI_Manager.bindFloppyDrives();
-});
+}

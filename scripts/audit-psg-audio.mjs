@@ -10,11 +10,11 @@
  *   npm run audit:psg              # compare HEAD à l'arbre de travail
  *   node scripts/audit-psg-audio.mjs /tmp/avant.js
  *
- * La version de référence est relue depuis `git show HEAD:site/js/core/audio/AY38910.js`.
+ * La version de référence est relue depuis `git show HEAD:SRC/core/audio/AY38910.js`.
  * Une fois les corrections commitées, les deux sources sont identiques : dans
  * ce cas, fournir explicitement l'ancienne version :
  *
- *   git show <commit-avant>:site/js/core/audio/AY38910.js > /tmp/avant.js
+ *   git show <commit-avant>:SRC/core/audio/AY38910.js > /tmp/avant.js
  *   node scripts/audit-psg-audio.mjs /tmp/avant.js
  *
  * Scénarios : (1) 200 000 coups d'horloge sans reset, (2) les mêmes avec 8
@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
 
 const ICI = dirname(fileURLToPath(import.meta.url));
-const CHEMIN = 'site/js/core/audio/AY38910.js';
+const CHEMIN = 'SRC/core/audio/AY38910.js';
 
 /** @returns {string} le source de la version de travail */
 const versionCourante = () => readFileSync(resolve(ICI, '..', CHEMIN), 'utf8');

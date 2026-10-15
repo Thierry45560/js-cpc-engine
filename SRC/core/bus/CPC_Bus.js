@@ -34,9 +34,9 @@
  * It is the ONLY place where modules know about each other.
  */
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // GLOBAL UTILITIES
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * Global error handler. Logs the message to the console.
@@ -46,9 +46,9 @@ window.throwError = function throwError(msg) {
     console.error(msg);
 };
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // STUBS — default values if the host application has not defined them
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 if (typeof Config_Manager === "undefined") {
     window.Config_Manager = {
@@ -77,9 +77,9 @@ if (typeof Emulator_Core === "undefined") {
     };
 }
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // MODULE WIRING
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * Memory_Manager (Memory.js)
@@ -170,7 +170,9 @@ Palette_Colors.link({
  * Receives keyboard row reads and PPI Port C state.
  */
 PSG_Sound_AY38910.link({
-    readKeyboardRow: () => Keyboard_Manager.readMatrixRow(),
+    // The PSG returns the matrix row selected by bits 3:0 of PPI port C through
+    // its register 14 (port A); `readAYPort` is the hardware read point.
+    readKeyboardRow: () => CPC_INPUT.keyboard.readAYPort(PPI_8255.portC & 0x0F),
     getPpiPortC    : () => PPI_8255.portC,
 });
 
@@ -201,8 +203,8 @@ PPI_8255.link({
     getTapeBitOut : ()    => TapeController.tapeBitOut,
     getVsyncActive: ()    => CRTC_Manager.vsyncActive,
     getBrandId    : ()    => Config_Manager.brandId,
-    getJoystick1  : ()    => InputExpansion.joystick1 ?? 1,
-    getJoystick2  : ()    => InputExpansion.joystick2 ?? 0,
+    getJoystick1  : ()    => CPC_INPUT.inputExpansion.joystick1 ?? 1,
+    getJoystick2  : ()    => CPC_INPUT.inputExpansion.joystick2 ?? 0,
     setMotorRelay : (v)   => TapeController.setMotorRelay(v),
     throwError    : (msg) => throwError(msg),
 });
@@ -220,21 +222,13 @@ TapeController.link({
  * Reads joystick-enabled flag and the currently selected keyboard row
  * from PPI Port C bits 3:0.
  */
-Keyboard_Manager.link({
+CPC_INPUT.keyboard.link({
     getJoystickEnabled: () => Config_Manager.joystickEnabled,
     getSelectedRow    : () => PPI_8255.portC & 0x0F,
 });
 
-/**
- * AutoType (Keyboard.js)
- * Reads the active firmware language to build the correct character map.
- */
-AutoType.bus = {
-    get language() { return Config_Manager.language; }
-};
-
 /** InputExpansion (Keyboard.js) — standalone, no bus required. */
-InputExpansion._bus = {};
+// InputExpansion is self-contained; no bus reference is required.
 
 /**
  * IO_Manager (IO_Bus.js)
@@ -253,7 +247,7 @@ IO_Manager.link({
     writeMemory      : (addr, data) => Memory_Manager.writePort(addr, data),
     writePpi         : (addr, data) => PPI_8255.writePort(addr, data),
     writeFdc         : (addr, data) => Floppy_Controller_FDC.writePort(addr, data),
-    writeInputExp    : (addr, data) => InputExpansion.writePort(addr, data),
+    writeInputExp    : (addr, data) => CPC_INPUT.inputExpansion.writePort(addr, data),
     clearIoWriteState: ()           => { CPU_Z80.ioWriteState = 0; },
 });
 
@@ -294,6 +288,7 @@ Display_Sync_Manager.link({
     displayHeight: Video_Hardware.height,
     display      : ()    => Video_Hardware.display(),
     setPixelIndex: (val) => { Video_Hardware.pixelIndex = val; },
+    onFrame      : ()    => CPC_INPUT.keyboard.onFrame(),
 });
 
 /**
@@ -334,9 +329,9 @@ ASIC_DMA_Controller.link({
     getTStates     : ()          => Emulator_Core.tStates,
 });
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Z80 CPU BUS — CPU instantiation
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * Z80 bus interface object passed to the Z80 CPU constructor.

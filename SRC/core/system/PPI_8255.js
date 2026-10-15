@@ -23,8 +23,8 @@
  * @property {Function} getTapeBitOut  - Returns TapeController.tapeBitOut
  * @property {Function} getVsyncActive - Returns CRTC_Manager.vsyncActive
  * @property {Function} getBrandId     - Returns Config_Manager.brandId
- * @property {Function} getJoystick1   - Returns InputExpansion.joystick1
- * @property {Function} getJoystick2   - Returns InputExpansion.joystick2
+ * @property {Function} getJoystick1   - Returns CPC_INPUT.inputExpansion.joystick1
+ * @property {Function} getJoystick2   - Returns CPC_INPUT.inputExpansion.joystick2
  * @property {Function} setMotorRelay  - TapeController.setMotorRelay(v)
  * @property {Function} throwError     - throwError(msg)
  *

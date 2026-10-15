@@ -2,11 +2,21 @@
  * @file UI_DOM.js
  * @module UI_Manager
  *
- * Single point of contact between the JS CPC emulator and the DOM / jQuery.
+ * Single point of contact between the JS CPC emulator and the DOM.
  *
  * All DOM interactions live here — no other emulator module touches the DOM
- * or jQuery directly, keeping core modules (AY38910, Memory, Display, …)
- * purely logical and reusable outside the browser.
+ * directly, keeping core modules (AY38910, Memory, Display, …) purely logical
+ * and reusable outside the browser.
+ *
+ * jQuery -> native DOM migration (2026-10): this file no longer depends on
+ * jQuery. Conventions:
+ *   - `document.querySelector` / `querySelectorAll` for selectors;
+ *   - `?` (optional chaining) where jQuery was null-tolerant
+ *     (`$('#absent').text(x)` did nothing, no SelectorError);
+ *   - `addEventListener` for events, removing the previous listener when the
+ *     code rebinds the same element;
+ *   - `classList` for classes, `textContent` for text;
+ *   - Web Animations API (`element.animate`) for appearances.
  *
  * Responsibilities:
  *   - Per-subsystem UI updates (PSG, ROM, memory, debugger, …)
@@ -21,6 +31,129 @@
  */
 
 "use strict";
+
+// ---------------------------------------------------------------------------
+// DOM helpers — native equivalents of the few jQuery uses with no direct match
+// ---------------------------------------------------------------------------
+
+/**
+ * Shows or hides a collection of elements with an opacity transition.
+ * Replaces `$(sel).fadeIn(ms)` / `$(sel).fadeOut(ms)`.
+ *
+ * The animation currently running is cancelled first (jQuery behaviour), and
+ * an element already in the requested state is left untouched.
+ *
+ * The state is read from the COMPUTED style, not from the inline style: the
+ * stylesheet hides the modals (`.modal { display: none }`) without any inline
+ * value, so `noeud.style.display` would always read as an empty string.
+ *
+ */
+const DISPLAY_PAR_TAG = new Map([
+    ['SPAN', 'inline'], ['A', 'inline'], ['B', 'inline'], ['I', 'inline'],
+    ['EM', 'inline'], ['STRONG', 'inline'], ['LABEL', 'inline'],
+    ['BUTTON', 'inline-block'], ['IMG', 'inline-block'], ['INPUT', 'inline-block'],
+]);
+
+/**
+ * Display value to set to make an element visible, per tag type.
+ *
+ * Useful when the `display: none` comes from the STYLESHEET: clearing the
+ * inline style does not override it, so an explicit value is required.
+ * `'block'` fits every container, which is the case here (modals and the
+ * printer output).
+ *
+ * @param {HTMLElement} noeud Element to make visible.
+ * @returns {string} `display` value to write as an inline style.
+ */
+function displayInitial(noeud) {
+    return DISPLAY_PAR_TAG.get(noeud.tagName) || 'block';
+}
+
+/**
+ * @param {string} selecteur CSS selector (may match several elements).
+ * @param {boolean} afficher `true` to appear, `false` to disappear.
+ * @param {number} ms Duration of the transition, in milliseconds.
+ * @returns {void}
+ */
+function animer(selecteur, afficher, ms) {
+    document.querySelectorAll(selecteur).forEach((noeud) => {
+        for (const precedente of noeud.getAnimations()) precedente.cancel();
+
+        // The computed style, not `style.display`: it is the only source that
+        // sees a `display: none` coming from the stylesheet.
+        const dejaVisible = getComputedStyle(noeud).display !== 'none';
+        if (afficher === dejaVisible) return;   // already in the requested state
+
+        // To appear, the element must be rendered *before* animating, otherwise
+        // the transition starts from a non-displayed element (hence no size).
+        // Clearing the inline style is not enough against a CSS hide, so the
+        // display matching the element type is set instead.
+        if (afficher) noeud.style.display = displayInitial(noeud);
+        const cible = afficher
+            ? [{ opacity: 0 }, { opacity: 1 }]
+            : [{ opacity: 1 }, { opacity: 0 }];
+        const anim = noeud.animate(cible, { duration: ms, fill: 'forwards' });
+        if (!afficher) anim.onfinish = () => { noeud.style.display = 'none'; };
+    });
+}
+
+/**
+ * Listener registry for this module: it allows listeners to be **removed**,
+ * which `$().off()` did and `addEventListener` cannot (the function reference
+ * must be kept). Pages that want to neutralise a generic button call
+ * `UI_Manager.detach(selecteur)`.
+ *
+ * @type {WeakMap<EventTarget, Map<string, Function>>}
+ */
+const _ecouteursUI = new WeakMap();
+
+/**
+ * Binds a listener with replacement: any previous listener of the same type
+ * on the same target is removed first (equivalent of
+ * `$(sel).off(ev).on(ev, fn)`).
+ *
+ * @param {EventTarget} cible Element, `document` or `window`.
+ * @param {string} type Event name, without the `on` prefix.
+ * @param {Function} fn The listener to (re)bind.
+ * @returns {void}
+ */
+function brancher(cible, type, fn) {
+    if (!cible) return;
+    let table = _ecouteursUI.get(cible);
+    if (!table) { table = new Map(); _ecouteursUI.set(cible, table); }
+    const ancien = table.get(type);
+    if (ancien) cible.removeEventListener(type, ancien);
+    table.set(type, fn);
+    cible.addEventListener(type, fn);
+}
+
+/**
+ * Removes every listener installed by `brancher()` on a target.
+ *
+ * @param {EventTarget} cible Element, `document` or `window`.
+ * @returns {void}
+ */
+function detacher(cible) {
+    const table = _ecouteursUI.get(cible);
+    if (!table) return;
+    for (const [type, fn] of table) cible.removeEventListener(type, fn);
+    table.clear();
+}
+
+/**
+ * Toggles the icon class of a button (an `<i>` child, Font Awesome style).
+ *
+ * @param {Element|null} bouton Button to update.
+ * @param {string} ancien Class to remove.
+ * @param {string} nouveau Class to add.
+ * @returns {void}
+ */
+function basculerIcone(bouton, ancien, nouveau) {
+    const icone = bouton?.querySelector('i');
+    if (!icone) return;
+    icone.classList.remove(ancien);
+    icone.classList.add(nouveau);
+}
 
 // ---------------------------------------------------------------------------
 // Shared DOM references — populated once in UI_Manager.init()
@@ -38,16 +171,16 @@ const UI_Manager = {
     /** @type {HTMLElement|null} Main emulator canvas element. */
     canvasEl         : null,
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Initialisation
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Queries and wires all required DOM elements.
-     * Must be called inside `$(document).ready`, before `AppMain.reset()`.
+     * Must be called once the DOM is ready, before `AppMain.reset()`.
      *
      * Also injects LED and counter references into the peripheral modules
-     * so they can update the UI without importing jQuery themselves.
+     * so they can update the UI without touching the DOM themselves.
      *
      * @returns {void}
      */
@@ -63,9 +196,9 @@ const UI_Manager = {
         Tape_Recorder.counterElement = this.tapeCounterEl;
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // UI update — PSG
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Refreshes all 16 PSG register display cells and highlights the
@@ -76,16 +209,19 @@ const UI_Manager = {
     updatePSG() {
         const psg = PSG_Sound_AY38910;
         for (let i = 0; i <= 15; i++) {
-            $(`#psg_r${i}`).text(toHex8(psg.Regs_Main[i])).removeClass("dasm-selected");
+            const cellule = document.querySelector(`#psg_r${i}`);
+            if (!cellule) continue;
+            cellule.textContent = toHex8(psg.Regs_Main[i]);
+            cellule.classList.remove("dasm-selected");
         }
         if (psg.Sel_Reg_Index <= 15) {
-            $(`#psg_r${psg.Sel_Reg_Index}`).addClass("dasm-selected");
+            document.querySelector(`#psg_r${psg.Sel_Reg_Index}`)?.classList.add("dasm-selected");
         }
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // UI update — Memory / ROM
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Refreshes the four memory bank mapping select elements.
@@ -94,9 +230,10 @@ const UI_Manager = {
      */
     updateMemoryMapping() {
         for (let i = 0; i <= 3; i++) {
-            $(`#pal_mapping_${i}`).val(
-                `Page ${Memory_Manager.Bank[i] >>> 16} / Bank ${(Memory_Manager.Bank[i] >>> 14) & 3}`
-            );
+            const select = document.querySelector(`#pal_mapping_${i}`);
+            if (!select) continue;
+            select.value =
+                `Page ${Memory_Manager.Bank[i] >>> 16} / Bank ${(Memory_Manager.Bank[i] >>> 14) & 3}`;
         }
     },
 
@@ -108,18 +245,19 @@ const UI_Manager = {
      */
     updateRomStatus() {
         const rom = ROM_Manager;
-        rom.lowerRomEnabled
-            ? $("#gatearray_lr").attr("checked", "checked")
-            : $("#gatearray_lr").removeAttr("checked");
-        rom.upperRomEnabled
-            ? $("#gatearray_ur").attr("checked", "checked")
-            : $("#gatearray_ur").removeAttr("checked");
-        $("#gatearray_ur_bank").text(toHex8(rom.selectedUpperRom));
+        // `.checked` (property) rather than the attribute: it is the real
+        // state of a checkbox and stays correct after an interaction.
+        const lr = document.querySelector("#gatearray_lr");
+        const ur = document.querySelector("#gatearray_ur");
+        if (lr) lr.checked = rom.lowerRomEnabled;
+        if (ur) ur.checked = rom.upperRomEnabled;
+        const banque = document.querySelector("#gatearray_ur_bank");
+        if (banque) banque.textContent = toHex8(rom.selectedUpperRom);
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Canvas and resize
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Resizes the canvas placeholder to fill the available window area
@@ -129,7 +267,10 @@ const UI_Manager = {
      */
     resizeCanvas() {
         const size = this.calculateCanvasSize();
-        $("#screen-placeholder").width(size.width).height(size.height);
+        const cadre = document.querySelector("#screen-placeholder");
+        if (!cadre) return;
+        cadre.style.width  = size.width + 'px';
+        cadre.style.height = size.height + 'px';
     },
 
     /**
@@ -151,9 +292,9 @@ const UI_Manager = {
         return                               { width: ah * RATIO, height: ah };
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Compatibility error display
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Appends a single error message to the error log element.
@@ -162,7 +303,7 @@ const UI_Manager = {
      * @returns {void}
      */
     showCompatError(message) {
-        $("#error-log").append(`<p>${message}</p>`);
+        document.querySelector("#error-log")?.insertAdjacentHTML("beforeend", `<p>${message}</p>`);
     },
 
     /**
@@ -172,15 +313,19 @@ const UI_Manager = {
      * @returns {void}
      */
     showCompatErrors(errors) {
-        $("#error-log")
-            .prepend("<div>JS CPC won't work on this browser:</div><ul>")
-            .append("</ul>")
-            .show();
+        const journal = document.querySelector("#error-log");
+        if (!journal) return;
+        journal.insertAdjacentHTML(
+            "afterbegin",
+            "<div>JS CPC won't work on this browser:</div><ul>"
+        );
+        journal.insertAdjacentHTML("beforeend", "</ul>");
+        journal.style.display = '';
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // FPS display
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Updates the status bar with the current frames-per-second count.
@@ -207,9 +352,9 @@ const UI_Manager = {
         if (this.statusEl) this.statusEl.innerHTML = text;
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Main button bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Attaches click handlers to the main emulator control buttons:
@@ -218,27 +363,54 @@ const UI_Manager = {
      * @returns {void}
      */
     bindMainButtons() {
-        $("#button-run").off("click").on("click", function () {
-            if ($(this).hasClass("button")) Emulator_Core.resumeEmulator();
+        const clicSiActif = (selecteur, action) => {
+            const bouton = document.querySelector(selecteur);
+            if (!bouton) return;
+            brancher(bouton, 'click', function () {
+                if (this.classList.contains("button")) action();
+            });
+        };
+        brancher(document.querySelector('#button-run'), 'click', function () {
+            if (this.classList.contains('button')) {
+                if (Emulator_Core.isPaused) {
+                    Emulator_Core.resumeEmulator();
+                } else {
+                    Emulator_Core.pauseEmulator();
+                }
+            }
         });
-        $("#button-reset").off("click").on("click", function () {
-            if ($(this).hasClass("button")) Emulator_Core.hardReset();
-        });
-        $("#button-step").off("click").on("click", function () {
-            if ($(this).hasClass("button")) { CPU_Z80.exec(); launch_debugger(); }
-        });
-        $("#button-stepover").off("click").on("click", function () {
-            if ($(this).hasClass("button")) Emulator_Core.stepOver();
-        });
-        $("#checkbox-joystick").off("click").on("click", function () {
-            Config_Manager.joystickEnabled = !Config_Manager.joystickEnabled;
-            $(this).toggleClass("active");
-        });
+        clicSiActif("#button-reset",   () => Emulator_Core.hardReset());
+        clicSiActif("#button-step",    () => { CPU_Z80.exec(); launch_debugger(); });
+        clicSiActif("#button-stepover",() => Emulator_Core.stepOver());
+
+        const joy = document.querySelector("#checkbox-joystick");
+        if (joy) {
+            brancher(joy, 'click', function () {
+                Config_Manager.joystickEnabled = !Config_Manager.joystickEnabled;
+                this.classList.toggle("active");
+            });
+        }
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // Event detachment (used by pages that replace generic bindings)
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Removes every listener this module attached to the matching element.
+     * Replaces the `$('#id').off('click')` idiom used by the game page.
+     *
+     * @param {string} selecteur CSS selector of the target element.
+     * @returns {void}
+     */
+    detach(selecteur) {
+        const noeud = document.querySelector(selecteur);
+        if (noeud) detacher(noeud);
+    },
+
+    // ---------------------------------------------------------------------------
     // Settings panel
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Attaches open/close handlers to the settings panel overlay.
@@ -248,29 +420,43 @@ const UI_Manager = {
      * @returns {void}
      */
     bindSettingsPanel() {
-        $("#checkbox-settings").off("click").on("click", () => {
-            Emulator_Core.pauseEmulator();
-            $("#option-panel-overlay, #option-panel").fadeIn(200);
-        });
-        $("#settings-close").off("click").on("click", () => {
-            Config_Manager.saveConfiguration();
-            Config_Manager.applyConfiguration();
-            $("#option-panel-overlay, #option-panel").fadeOut(200);
-            Emulator_Core.resumeEmulator();
-        });
-        $("#option-panel-overlay").off("click").on("click", () => {
-            $("#option-panel-overlay, #option-panel").fadeOut(200);
-            Emulator_Core.resumeEmulator();
-        });
+        const ouvrir = document.querySelector("#checkbox-settings");
+        const fermer = document.querySelector("#settings-close");
+        const voile  = document.querySelector("#option-panel-overlay");
+        if (ouvrir) {
+            brancher(ouvrir, 'click', () => {
+                Emulator_Core.pauseEmulator();
+                animer("#option-panel-overlay, #option-panel", true, 200);
+            });
+        }
+        if (fermer) {
+            brancher(fermer, 'click', () => {
+                Config_Manager.saveConfiguration();
+                Config_Manager.applyConfiguration();
+                animer("#option-panel-overlay, #option-panel", false, 200);
+                Emulator_Core.resumeEmulator();
+            });
+        }
+        if (voile) {
+            brancher(voile, 'click', () => {
+                animer("#option-panel-overlay, #option-panel", false, 200);
+                Emulator_Core.resumeEmulator();
+            });
+        }
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Sound button
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Reads the sound preference from the cookie, sets the initial icon state,
      * and attaches a click handler that toggles audio output on/off.
+     *
+     * When sound is enabled, the first user gesture also arms
+     * `bindAudioResume()`: the audio context cannot be created at load time
+     * (autoplay policy), so without it the page stays silent until the user
+     * manually toggles sound off and on again.
      *
      * @returns {void}
      */
@@ -279,32 +465,38 @@ const UI_Manager = {
         Config_Manager.soundEnabled = (_soundCookie !== "false");
 
         if (Config_Manager.soundEnabled) {
-            $("#checkbox-sound").addClass("active")
-                .find("i").removeClass("fa-volume-mute").addClass("fa-volume-up");
+            document.querySelector("#checkbox-sound")?.classList.add("active");
+            basculerIcone(document.querySelector("#checkbox-sound"), "fa-volume-mute", "fa-volume-up");
+
+            // Sound is on by default, so the audio context must be created on
+            // the FIRST user gesture: an `AudioContext` opened outside a
+            // gesture stays "suspended" and `Audio_Output.executeTicks()`
+            // produces nothing until `init()` has completed.
+            UI_Manager.bindAudioResume("pointerdown touchstart keydown");
         } else {
-            $("#checkbox-sound").removeClass("active")
-                .find("i").removeClass("fa-volume-up").addClass("fa-volume-mute");
+            document.querySelector("#checkbox-sound")?.classList.remove("active");
+            basculerIcone(document.querySelector("#checkbox-sound"), "fa-volume-up", "fa-volume-mute");
         }
 
-        $("#checkbox-sound").off("click").on("click", async function () {
+        brancher(document.querySelector("#checkbox-sound"), 'click', async function () {
             if (Config_Manager.soundEnabled) {
                 Config_Manager.soundEnabled = false;
                 setCookie("sound", false, 365);
-                $(this).removeClass("active")
-                    .find("i").removeClass("fa-volume-up").addClass("fa-volume-mute");
+                this.classList.remove("active");
+                basculerIcone(this, "fa-volume-up", "fa-volume-mute");
             } else {
                 await Audio_Output.Resume();
                 Config_Manager.soundEnabled = true;
                 setCookie("sound", true, 365);
-                $(this).addClass("active")
-                    .find("i").removeClass("fa-volume-mute").addClass("fa-volume-up");
+                this.classList.add("active");
+                basculerIcone(this, "fa-volume-mute", "fa-volume-up");
             }
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Snapshot / machine selector
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Binds the machine/snapshot selector dropdown.
@@ -314,12 +506,14 @@ const UI_Manager = {
      * @returns {void}
      */
     bindSnapshotSelector() {
-        $("#snapshot").val("none");
-        $("#checkbox-debugger").removeAttr("checked");
+        const selecteur = document.querySelector("#snapshot");
+        if (selecteur) selecteur.value = "none";
+        const debug = document.querySelector("#checkbox-debugger");
+        if (debug) debug.checked = false;
 
-        $("#snapshot").off("change").on("change", function () {
-            $(this).blur();
-            const val = $(this).val();
+        brancher(selecteur, 'change', function () {
+            this.blur();
+            const val = this.value;
             if (!val || val === "none") return;
 
             const ROM_PATH = "ROM/";
@@ -368,9 +562,9 @@ const UI_Manager = {
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Miscellaneous helpers
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Prevents form controls (buttons, radios, checkboxes) from retaining
@@ -380,9 +574,15 @@ const UI_Manager = {
      * @returns {void}
      */
     blurFormControls() {
-        $(":button, :radio, :submit, :checkbox").on("focus", function () {
-            $(this).blur();
-        });
+        // The original jQuery selector `":button, :radio, :submit, :checkbox"`
+        // covered `<button>` **and** `<input type=button|submit|reset>`, plus
+        // the three checkbox types. The types are therefore listed explicitly
+        // rather than using "button, input", which would also catch text
+        // input fields.
+        const types = ["button", "reset", "submit", "radio", "checkbox"];
+        document.querySelectorAll(
+            "button, " + types.map((t) => `input[type=${t}]`).join(", ")
+        ).forEach((noeud) => brancher(noeud, 'focus', function () { this.blur(); }));
     },
 
     /**
@@ -392,9 +592,12 @@ const UI_Manager = {
      * @returns {void}
      */
     updateDrivePanels() {
-        $("#fieldset-drivea").show();
-        if ($("#floppy-option").is(":checked")) $("#fieldset-driveb").show();
-        if ($("#tape-option").is(":checked"))   $("#fieldset-tape").show();
+        const drivea = document.querySelector("#fieldset-drivea");
+        if (drivea) drivea.style.display = '';
+        const driveb = document.querySelector("#fieldset-driveb");
+        const tape   = document.querySelector("#fieldset-tape");
+        if (document.querySelector("#floppy-option")?.checked && driveb) driveb.style.display = '';
+        if (document.querySelector("#tape-option")?.checked && tape) tape.style.display = '';
     },
 
     /**
@@ -404,7 +607,8 @@ const UI_Manager = {
      * @returns {void}
      */
     toggleCartPanel(show) {
-        $("#fieldset-cart").toggle(show);
+        const cart = document.querySelector("#fieldset-cart");
+        if (cart) cart.style.display = show ? '' : 'none';
     },
 
     /**
@@ -413,8 +617,10 @@ const UI_Manager = {
      * @returns {void}
      */
     showEmulatorScreen() {
-        $("#screen").show();
-        $("#logo, #browser-nfo").hide();
+        const ecran = document.querySelector("#screen");
+        if (ecran) ecran.style.display = '';
+        document.querySelectorAll("#logo, #browser-nfo")
+            .forEach((noeud) => { noeud.style.display = 'none'; });
     },
 
     /**
@@ -425,31 +631,46 @@ const UI_Manager = {
      * @returns {void}
      */
     setRunningState(running) {
+        // `setRunningState` is called on every transition: `#button-run` is
+        // rebound each time, so the previous listener is removed first
+        // (equivalent of jQuery's `.off('click')`).
+        const run = document.querySelector("#button-run");
+        const etapes = document.querySelectorAll("#button-step, #button-stepover");
+        const autres = document.querySelectorAll("#button-run, #button-reset");
+
         if (running) {
-            $("#button-step, #button-stepover")
-                .removeClass("button").addClass("disabled-button");
-            $("#button-run")
-                .html('<span class="guifx2">2 </span>Pause')
-                .off("click")
-                .on("click", function () {
-                    if ($(this).hasClass("button")) Emulator_Core.pauseEmulator();
+            etapes.forEach((n) => {
+                n.classList.remove("button");
+                n.classList.add("disabled-button");
+            });
+            if (run) {
+                run.innerHTML = '<span class="guifx2">2 </span>Pause';
+                brancher(run, 'click', function () {
+                    if (this.classList.contains("button")) Emulator_Core.pauseEmulator();
                 });
-            $("#button-run, #button-reset").removeClass("disabled-button").addClass("button");
+            }
+            autres.forEach((n) => {
+                n.classList.remove("disabled-button");
+                n.classList.add("button");
+            });
         } else {
-            $("#button-run")
-                .html('<span class="guifx2">d </span> Resume')
-                .off("click")
-                .on("click", function () {
-                    if ($(this).hasClass("button")) Emulator_Core.resumeEmulator();
+            if (run) {
+                run.innerHTML = '<span class="guifx2">d </span> Resume';
+                brancher(run, 'click', function () {
+                    if (this.classList.contains("button")) Emulator_Core.resumeEmulator();
                 });
-            $("#button-run, #button-reset, #button-step, #button-stepover")
-                .removeClass("disabled-button").addClass("button");
+            }
+            document.querySelectorAll("#button-run, #button-reset, #button-step, #button-stepover")
+                .forEach((n) => {
+                    n.classList.remove("disabled-button");
+                    n.classList.add("button");
+                });
         }
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Cookie-based configuration persistence
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Reads the current UI control values and persists them as cookies
@@ -458,16 +679,17 @@ const UI_Manager = {
      * @returns {void}
      */
     saveConfigToCookies() {
-        const radio = (name) => $(`input:radio[name=${name}]:checked`).val();
+        const radio = (name) => document.querySelector(`input[type=radio][name=${name}]:checked`)?.value;
+        const coche = (sel) => document.querySelector(sel)?.checked;
         setCookie("brand",    radio("brand"),    365);
         setCookie("firmware", radio("firmware"), 365);
         setCookie("monitor",  radio("monitor"),  365);
         setCookie("audio",    radio("audio"),    365);
         setCookie("crtc",     radio("crtc"),     365);
-        setCookie("floppy",   $("#floppy-option").is(":checked"), 365);
-        setCookie("tape",     $("#tape-option").is(":checked"),   365);
-        setCookie("ram",      $("#ram-option").is(":checked"),    365);
-        setCookie("sound",    Config_Manager.soundEnabled,         365);
+        setCookie("floppy",   coche("#floppy-option"), 365);
+        setCookie("tape",     coche("#tape-option"),   365);
+        setCookie("ram",      coche("#ram-option"),    365);
+        setCookie("sound",    Config_Manager.soundEnabled, 365);
     },
 
     /**
@@ -481,29 +703,39 @@ const UI_Manager = {
     loadConfigFromCookies() {
         let val;
 
+        // `.checked` (property): the `checked` attribute would not be enough,
+        // since the user may have changed the checkbox meanwhile.
+        const cocher = (selecteur) => {
+            const radio = document.querySelector(selecteur);
+            if (radio) radio.checked = true;
+        };
+
         val = getCookie("brand");
         if (!["awa", "schneider", "amstrad"].includes(val)) val = "amstrad";
-        $(`input:radio[name=brand][value=${val}]`).attr("checked", true);
+        cocher(`input[type=radio][name=brand][value=${val}]`);
 
         val = getCookie("firmware");
         if (!["english", "french", "spanish"].includes(val)) val = "spanish";
-        $(`input:radio[name=firmware][value=${val}]`).attr("checked", true);
+        cocher(`input[type=radio][name=firmware][value=${val}]`);
 
         val = getCookie("monitor");
         if (!["colour", "green", "grayscale"].includes(val)) val = "colour";
-        $(`input:radio[name=monitor][value=${val}]`).attr("checked", true);
+        cocher(`input[type=radio][name=monitor][value=${val}]`);
 
         val = getCookie("audio");
         if (!["mono", "stereo"].includes(val)) val = "stereo";
-        $(`input:radio[name=audio][value=${val}]`).attr("checked", true);
+        cocher(`input[type=radio][name=audio][value=${val}]`);
 
         val = getCookie("crtc");
         if (!["type0", "type1", "type2", "type3"].includes(val)) val = "type1";
-        $(`input:radio[name=crtc][value=${val}]`).attr("checked", true);
+        cocher(`input[type=radio][name=crtc][value=${val}]`);
 
-        $("#floppy-option").attr("checked", getCookie("floppy") === "true");
-        $("#tape-option")  .attr("checked", getCookie("tape")   === "true");
-        $("#ram-option")   .attr("checked", getCookie("ram")    === "true");
+        const floppy = document.querySelector("#floppy-option");
+        const tape   = document.querySelector("#tape-option");
+        const ram    = document.querySelector("#ram-option");
+        if (floppy) floppy.checked = getCookie("floppy") === "true";
+        if (tape)   tape.checked   = getCookie("tape")   === "true";
+        if (ram)    ram.checked    = getCookie("ram")    === "true";
     },
 
     /**
@@ -515,15 +747,17 @@ const UI_Manager = {
      *             tape: boolean, ram: boolean }} Current UI configuration.
      */
     readConfigFromUI() {
+        const radio = (name) => document.querySelector(`input[type=radio][name=${name}]:checked`)?.value;
+        const coche = (sel) => document.querySelector(sel)?.checked;
         return {
-            brand    : $("input:radio[name=brand]:checked").val(),
-            firmware : $("input:radio[name=firmware]:checked").val(),
-            monitor  : $("input:radio[name=monitor]:checked").val(),
-            audio    : $("input:radio[name=audio]:checked").val(),
-            crtcType : $("input:radio[name=crtc]:checked").val(),
-            floppyB  : $("#floppy-option").is(":checked"),
-            tape     : $("#tape-option").is(":checked"),
-            ram      : $("#ram-option").is(":checked"),
+            brand    : radio("brand"),
+            firmware : radio("firmware"),
+            monitor  : radio("monitor"),
+            audio    : radio("audio"),
+            crtcType : radio("crtc"),
+            floppyB  : coche("#floppy-option"),
+            tape     : coche("#tape-option"),
+            ram      : coche("#ram-option"),
         };
     },
 
@@ -535,21 +769,32 @@ const UI_Manager = {
      * @returns {void}
      */
     applyDriveVisibility(cfg) {
+        // jQuery's `:visible` <=> the element has at least one render rect.
+        const visible = (sel) => (document.querySelector(sel)?.getClientRects().length ?? 0) > 0;
+
         if (cfg.floppyB) {
             Floppy_Drive_B.ready = true;
-            if ($("#fieldset-drivea").is(":visible")) $("#fieldset-driveb").show();
+            if (visible("#fieldset-drivea")) {
+                const b = document.querySelector("#fieldset-driveb");
+                if (b) b.style.display = '';
+            }
         } else {
             Floppy_Drive_B.ready = false;
-            $("#fieldset-driveb").hide();
+            const b = document.querySelector("#fieldset-driveb");
+            if (b) b.style.display = 'none';
         }
 
         if (cfg.tape) {
             Tape_Recorder.ready = true;
-            if ($("#fieldset-drivea").is(":visible")) $("#fieldset-tape").show();
+            if (visible("#fieldset-drivea")) {
+                const t = document.querySelector("#fieldset-tape");
+                if (t) t.style.display = '';
+            }
         } else {
-            $("#tape-stop").click();
+            document.querySelector("#tape-stop")?.click();
             Tape_Recorder.ready = false;
-            $("#fieldset-tape").hide();
+            const t = document.querySelector("#fieldset-tape");
+            if (t) t.style.display = 'none';
         }
     },
 
@@ -561,16 +806,15 @@ const UI_Manager = {
      * @returns {void}
      */
     forceCrtcRadio(machineType) {
-        if (machineType === 2) {
-            $("input:radio[name=crtc][value=type1]").prop("checked", true);
-        } else if (machineType >= 4) {
-            $("input:radio[name=crtc][value=type3]").prop("checked", true);
-        }
+        const valeur = machineType === 2 ? 'type1' : (machineType >= 4 ? 'type3' : null);
+        if (!valeur) return;
+        const radio = document.querySelector(`input[type=radio][name=crtc][value=${valeur}]`);
+        if (radio) radio.checked = true;
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Floppy drive bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires all DOM events for floppy drives A and B:
@@ -581,11 +825,11 @@ const UI_Manager = {
     bindFloppyDrives() {
         window.files = window.files || {};
 
-        $('#drivea-input').on('change', function (e) {
+        brancher(document.querySelector('#drivea-input'), 'change', function (e) {
             handleDiskUpload(e.target.files[0], Floppy_Drive_A, 'drivea-filename', 'drivea-eject', 'drivea-programs');
         });
 
-        $('#drivea-eject').on('click', function () {
+        brancher(document.querySelector('#drivea-eject'), 'click', function () {
             if (Floppy_Drive_A.isDirty) {
                 if (confirm("La disquette a été modifiée. Voulez-vous la sauvegarder avant l'éjection ?")) {
                     downloadDisk(Floppy_Drive_A);
@@ -593,21 +837,25 @@ const UI_Manager = {
             }
             Floppy_Drive_A.diskImage = null;
             Floppy_Drive_A.isDirty   = false;
-            $('#drivea-filename').text('Vide');
-            $('#drivea-programs').hide().empty();
-            $(this).removeClass('button').addClass('disabled-button');
-            $('#drivea-input').val('');
+            const nom = document.querySelector('#drivea-filename');
+            if (nom) nom.textContent = 'Vide';
+            const liste = document.querySelector('#drivea-programs');
+            if (liste) { liste.style.display = 'none'; liste.replaceChildren(); }
+            this.classList.remove('button');
+            this.classList.add('disabled-button');
+            const input = document.querySelector('#drivea-input');
+            if (input) input.value = '';
         });
 
-        $('#drivea-new').off('click').on('click', function () {
+        brancher(document.querySelector('#drivea-new'), 'click', function () {
             mountBlankDSK(Floppy_Drive_A, 'drivea-filename', 'drivea-eject');
         });
 
-        $('#driveb-input').on('change', function (e) {
+        brancher(document.querySelector('#driveb-input'), 'change', function (e) {
             handleDiskUpload(e.target.files[0], Floppy_Drive_B, 'driveb-filename', 'driveb-eject', 'driveb-programs');
         });
 
-        $('#driveb-eject').on('click', function () {
+        brancher(document.querySelector('#driveb-eject'), 'click', function () {
             if (Floppy_Drive_B.isDirty) {
                 if (confirm("La disquette a été modifiée. Voulez-vous la sauvegarder avant l'éjection ?")) {
                     downloadDisk(Floppy_Drive_B);
@@ -615,20 +863,24 @@ const UI_Manager = {
             }
             Floppy_Drive_B.diskImage = null;
             Floppy_Drive_B.isDirty   = false;
-            $('#driveb-filename').text('Vide');
-            $('#driveb-programs').hide().empty();
-            $(this).removeClass('button').addClass('disabled-button');
-            $('#driveb-input').val('');
+            const nom = document.querySelector('#driveb-filename');
+            if (nom) nom.textContent = 'Vide';
+            const liste = document.querySelector('#driveb-programs');
+            if (liste) { liste.style.display = 'none'; liste.replaceChildren(); }
+            this.classList.remove('button');
+            this.classList.add('disabled-button');
+            const input = document.querySelector('#driveb-input');
+            if (input) input.value = '';
         });
 
-        $('#driveb-new').off('click').on('click', function () {
+        brancher(document.querySelector('#driveb-new'), 'click', function () {
             mountBlankDSK(Floppy_Drive_B, 'driveb-filename', 'driveb-eject');
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Tape bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires DOM events for the tape deck: file load, new blank tape, and save.
@@ -636,7 +888,7 @@ const UI_Manager = {
      * @returns {void}
      */
     bindTape() {
-        $('#tape-input').off('change').on('change', function () {
+        brancher(document.querySelector('#tape-input'), 'change', function () {
             const file = this.files[0];
             if (!file) return;
             if (typeof Tape_Recorder === 'undefined' || typeof TapeController === 'undefined') return;
@@ -647,65 +899,178 @@ const UI_Manager = {
                 if (!parsed) return;
                 TapeController.ejectTape();
                 Tape_Recorder.diskImage = parsed;
-                $('#tape-filename').text(file.name);
-                $('#tape-eject').removeClass('disabled-button').addClass('button');
+                const nom = document.querySelector('#tape-filename');
+                if (nom) nom.textContent = file.name;
+                const eject = document.querySelector('#tape-eject');
+                eject?.classList.remove('disabled-button');
+                eject?.classList.add('button');
                 TapeController.setTapeState(TapeController.STATE_STOP);
                 analyzeTape(Tape_Recorder.diskImage);
             };
             reader.readAsArrayBuffer(file);
         });
 
-        $('#tape-eject').off('click').on('click', function () {
-            if ($(this).hasClass('disabled-button')) return;
+        brancher(document.querySelector('#tape-eject'), 'click', function () {
+            if (this.classList.contains('disabled-button')) return;
             if (typeof TapeController === 'undefined') return;
             TapeController.ejectTape();
             Tape_Recorder.diskImage = null;
-            $('#tape-filename').text('Aucune cassette');
-            $('#tape-input').val('');
-            $(this).removeClass('button').addClass('disabled-button');
+            const nom = document.querySelector('#tape-filename');
+            if (nom) nom.textContent = 'Aucune cassette';
+            const input = document.querySelector('#tape-input');
+            if (input) input.value = '';
+            this.classList.remove('button');
+            this.classList.add('disabled-button');
         });
 
-        $('#tape-new').off('click').on('click', function () {
+        brancher(document.querySelector('#tape-new'), 'click', function () {
             if (typeof WAV_Parser === 'undefined' || typeof TapeController === 'undefined') return;
             TapeController.ejectTape();
             Tape_Recorder.diskImage = WAV_Parser.createBlankTape(90);
-            $('#tape-filename').text('Cassette Vierge (90 min)');
-            $('#tape-eject').removeClass('disabled-button').addClass('button');
+            const nom = document.querySelector('#tape-filename');
+            if (nom) nom.textContent = 'Cassette Vierge (90 min)';
+            const eject = document.querySelector('#tape-eject');
+            eject?.classList.remove('disabled-button');
+            eject?.classList.add('button');
             TapeController.setTapeState(TapeController.STATE_STOP);
         });
 
-        $('#tape-save').off('click').on('click', function () {
+        brancher(document.querySelector('#tape-save'), 'click', function () {
             if (typeof Tape_Recorder !== 'undefined' && Tape_Recorder.diskImage) {
                 downloadTapeAsWav(Tape_Recorder.diskImage);
             }
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Keyboard / AutoType bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
-     * Wires the AutoType send and clear buttons.
+     * Wires the Auto-Type send and clear buttons, and the mode choice.
+     *
+     *   - `clavier` (default): the listing is typed key by key, the firmware
+     *     tokenises it and manages memory itself;
+     *   - `memoire`: the listing is tokenised on the PC side and written as-is
+     *     at &0170. Instant, but it overwrites the current program.
      *
      * @returns {void}
      */
     bindKeyboard() {
-        $('#autotype-send').off('click').on('click', function () {
-            const code = $('#autotype-area').val();
+        brancher(document.querySelector('#autotype-send'), 'click', function () {
+            const code = document.querySelector('#autotype-area')?.value;
             if (!code) return;
-            AutoType.inject(code + '\r');
+            if (UI_Manager._modeAutotype() === 'memoire') {
+                UI_Manager._transfererEnMemoire(code);
+                return;
+            }
+            CPC_INPUT.keyboard.autotype(code + '\r');
         });
 
-        $('#autotype-clear').on('click', function () {
-            AutoType.cancel();
-            $('#autotype-area').val('');
+        UI_Manager._brancherModesAutotype();
+
+        brancher(document.querySelector('#autotype-clear'), 'click', function () {
+            CPC_INPUT.keyboard.cancelAutotype();
+            const zone = document.querySelector('#autotype-area');
+            if (zone) zone.value = '';
+            UI_Manager._noteAutotype('', '');
         });
     },
 
-    // -------------------------------------------------------------------------
+    /**
+     * Send mode selected in the Auto-Type card.
+     * @returns {string} `clavier` (default) or `memoire`.
+     */
+    _modeAutotype() {
+        const coche = document.querySelector('input[name=autotype-mode]:checked');
+        return coche ? coche.value : 'clavier';
+    },
+
+    /**
+     * Listens to the mode radio buttons and keeps the button label in sync.
+     * No effect on pages without these controls: game.html only keeps the
+     * keyboard mode, used by the auto-run.
+     * @returns {void}
+     */
+    _brancherModesAutotype() {
+        document.querySelectorAll('input[name=autotype-mode]').forEach(function (radio) {
+            brancher(radio, 'change', function () { UI_Manager._majModeAutotype(); });
+        });
+        UI_Manager._majModeAutotype();
+    },
+
+    /**
+     * Adapts the send button label to the selected mode.
+     * @returns {void}
+     */
+    _majModeAutotype() {
+        const libelle = document.querySelector('#autotype-send-label');
+        if (libelle) {
+            libelle.textContent = (UI_Manager._modeAutotype() === 'memoire')
+                ? 'Transférer en mémoire'
+                : 'Injecter dans le CPC';
+        }
+        UI_Manager._noteAutotype('', '');
+    },
+
+    /**
+     * Writes a message under the Auto-Type button (result of the last send).
+     * @param {string} texte  Message; empty string to clear.
+     * @param {string} classe `ok`, `erreur`, or an empty string.
+     * @returns {void}
+     */
+    _noteAutotype(texte, classe) {
+        const note = document.querySelector('#autotype-note');
+        if (!note) return;
+        note.textContent = texte;
+        note.className = 'autotype-note' + (classe ? ' ' + classe : '');
+    },
+
+    /**
+     * Transfers a BASIC listing straight to memory (&0170) instead of typing
+     * it key by key.
+     *
+     * The current program and its variables are overwritten, hence the
+     * explicit confirmation. Nothing runs automatically: the user types RUN or
+     * LIST, which avoids running a half-checked listing.
+     *
+     * @param {string} source ASCII listing typed in the Auto-Type area.
+     * @returns {void}
+     */
+    _transfererEnMemoire(source) {
+        if (typeof BasicTokenizer === 'undefined' || typeof ROM_Manager === 'undefined') {
+            UI_Manager._noteAutotype('Transfert mémoire indisponible.', 'erreur');
+            return;
+        }
+
+        const avertissement = 'Le transfert mémoire écrase le programme BASIC et ses '
+            + 'variables. Continuer ?';
+        if (!window.confirm(avertissement)) return;
+
+        const resultat = BasicTokenizer.injecter(
+            source,
+            Machine_Type,
+            function (adresse, valeur) { ROM_Manager.writeMemory(adresse, valeur); },
+        );
+
+        if (!resultat.ok) {
+            const erreur = resultat.erreurs[0];
+            UI_Manager._noteAutotype(
+                'Échec' + (erreur.ligne ? ' ligne ' + erreur.ligne : '') + ' : ' + erreur.message,
+                'erreur',
+            );
+            return;
+        }
+
+        UI_Manager._noteAutotype(
+            resultat.lignes + ' ligne(s), ' + resultat.octets + ' octets — tapez RUN ou LIST',
+            'ok',
+        );
+    },
+
+    // ---------------------------------------------------------------------------
     // Snapshot bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires the snapshot capture, load (including ZIP multi-entry handling),
@@ -714,59 +1079,66 @@ const UI_Manager = {
      * @returns {void}
      */
     bindSnapshot() {
-        $('#snapshot-capture').off('click').on('click', function () {
+        brancher(document.querySelector('#snapshot-capture'), 'click', function () {
             Snapshot_Manager.takeSnapshot();
         });
 
-        $('#snapshot-input').off('change').on('change', function (e) {
+        brancher(document.querySelector('#snapshot-input'), 'change', function (e) {
             const file = e.target.files[0];
             if (!file) return;
 
-            $('#snapshot-filename').text(file.name);
-            $('#snapshot-eject').removeClass('disabled-button');
+            const nom = document.querySelector('#snapshot-filename');
+            const eject = document.querySelector('#snapshot-eject');
+            const liste = document.querySelector('#snapshot-zipselect');
+            if (nom) nom.textContent = file.name;
+            eject?.classList.remove('disabled-button');
 
             if (file.name.toLowerCase().endsWith('.zip')) {
                 Snapshot_Manager.extractZipEntries(file, snaFiles => {
                     if (!snaFiles || snaFiles.length === 0) {
-                        $('#snapshot-filename').text('Aucun snapshot');
-                        $('#snapshot-eject').addClass('disabled-button');
+                        if (nom) nom.textContent = 'Aucun snapshot';
+                        eject?.classList.add('disabled-button');
                         return;
                     }
                     Snapshot_Manager.currentZipEntries = snaFiles;
-                    if (snaFiles.length > 1) {
-                        const $select = $('#snapshot-zipselect').empty();
-                        snaFiles.forEach(f => $select.append($('<option>', { value: f.name, text: f.name })));
-                        $select.show();
+                    if (snaFiles.length > 1 && liste) {
+                        liste.replaceChildren();
+                        snaFiles.forEach(f => liste.add(new Option(f.name, f.name)));
+                        liste.style.display = '';
                         Snapshot_Manager.loadFromZipEntry(snaFiles[0].entry);
                     } else {
-                        $('#snapshot-zipselect').hide();
+                        if (liste) liste.style.display = 'none';
                         Snapshot_Manager.loadFromZipEntry(snaFiles[0].entry);
                     }
                 });
             } else {
-                $('#snapshot-zipselect').hide();
+                if (liste) liste.style.display = 'none';
                 const reader = new FileReader();
                 reader.onload = event => Snapshot_Manager.loadSnapshot(event.target.result);
                 reader.readAsArrayBuffer(file);
             }
         });
 
-        $('#snapshot-zipselect').off('change').on('change', function () {
-            const selectedName = $(this).val();
+        brancher(document.querySelector('#snapshot-zipselect'), 'change', function () {
+            const selectedName = this.value;
             const found = Snapshot_Manager.currentZipEntries &&
                 Snapshot_Manager.currentZipEntries.find(f => f.name === selectedName);
             if (found) {
                 Snapshot_Manager.loadFromZipEntry(found.entry);
-                $('#snapshot-filename').text(selectedName);
+                const nom = document.querySelector('#snapshot-filename');
+                if (nom) nom.textContent = selectedName;
             }
         });
 
-        $('#snapshot-eject').off('click').on('click', function () {
-            if ($(this).hasClass('disabled-button')) return;
-            $('#snapshot-filename').text('Aucun snapshot');
-            $('#snapshot-input').val('');
-            $('#snapshot-zipselect').hide().empty();
-            $(this).addClass('disabled-button');
+        brancher(document.querySelector('#snapshot-eject'), 'click', function () {
+            if (this.classList.contains('disabled-button')) return;
+            const nom = document.querySelector('#snapshot-filename');
+            if (nom) nom.textContent = 'Aucun snapshot';
+            const input = document.querySelector('#snapshot-input');
+            if (input) input.value = '';
+            const liste = document.querySelector('#snapshot-zipselect');
+            if (liste) { liste.style.display = 'none'; liste.replaceChildren(); }
+            this.classList.add('disabled-button');
             Snapshot_Manager.ejectSnapshot();
             if (typeof Emulator_Core !== 'undefined') {
                 Emulator_Core.pauseEmulator();
@@ -774,9 +1146,9 @@ const UI_Manager = {
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Cartridge bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires the cartridge file input and eject button.
@@ -785,7 +1157,7 @@ const UI_Manager = {
      * @returns {void}
      */
     bindCartridge() {
-        $('#cart-input').on('change', function (e) {
+        brancher(document.querySelector('#cart-input'), 'change', function (e) {
             const file = e.target.files[0];
             if (!file) return;
 
@@ -795,26 +1167,32 @@ const UI_Manager = {
                 window.currentCprPath = `USER/${file.name}`;
                 window.files          = window.files || {};
                 window.files[window.currentCprPath] = data;
-                $('#cart-filename').text(file.name);
-                $('#cart-eject').removeClass('disabled-button').addClass('button');
+                const nom = document.querySelector('#cart-filename');
+                if (nom) nom.textContent = file.name;
+                const eject = document.querySelector('#cart-eject');
+                eject?.classList.remove('disabled-button');
+                eject?.classList.add('button');
                 Emulator_Core.hardReset();
             };
             reader.readAsArrayBuffer(file);
         });
 
-        $('#cart-eject').on('click', function () {
-            if ($(this).hasClass('disabled-button')) return;
+        brancher(document.querySelector('#cart-eject'), 'click', function () {
+            if (this.classList.contains('disabled-button')) return;
             window.currentCprPath = null;
-            $('#cart-filename').text('Aucune cartouche');
-            $(this).removeClass('button').addClass('disabled-button');
-            $('#cart-input').val('');
+            const nom = document.querySelector('#cart-filename');
+            if (nom) nom.textContent = 'Aucune cartouche';
+            this.classList.remove('button');
+            this.classList.add('disabled-button');
+            const input = document.querySelector('#cart-input');
+            if (input) input.value = '';
             Emulator_Core.hardReset();
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Virtual printer bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires the virtual printer clear and output toggle buttons.
@@ -822,26 +1200,26 @@ const UI_Manager = {
      * @returns {void}
      */
     bindPrinter() {
-        $('#printer-clear').on('click', function () {
+        brancher(document.querySelector('#printer-clear'), 'click', function () {
             if (typeof VirtualPrinter !== 'undefined') VirtualPrinter.clear();
         });
 
-        $('#printer-toggle').on('click', function () {
-            const $output = $('#printer-output');
-            const $icon   = $(this).find('i');
-            if ($output.is(':visible')) {
-                $output.slideUp(150);
-                $icon.removeClass('fa-chevron-up').addClass('fa-chevron-down');
+        brancher(document.querySelector('#printer-toggle'), 'click', function () {
+            const sortie = document.querySelector('#printer-output');
+            const visible = (sortie?.getClientRects().length ?? 0) > 0;
+            if (visible) {
+                animer('#printer-output', false, 150);
+                basculerIcone(this, 'fa-chevron-up', 'fa-chevron-down');
             } else {
-                $output.slideDown(150);
-                $icon.removeClass('fa-chevron-down').addClass('fa-chevron-up');
+                animer('#printer-output', true, 150);
+                basculerIcone(this, 'fa-chevron-down', 'fa-chevron-up');
             }
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Turbo button
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires the turbo toggle button. Enabling turbo mode also mutes the sound
@@ -850,27 +1228,29 @@ const UI_Manager = {
      * @returns {void}
      */
     bindTurboButton() {
-        $('#button-turbo').off('click').on('click', function () {
+        const turbo = document.querySelector('#button-turbo');
+        if (!turbo) return;
+        brancher(turbo, 'click', function () {
             if (typeof toggleTurbo === 'undefined') return;
             toggleTurbo();
             if (Config_Manager.turboMode) {
-                $(this).addClass('turbo-on');
+                this.classList.add('turbo-on');
                 if (Config_Manager.soundEnabled) {
                     Config_Manager.soundEnabled = false;
                     if (typeof setCookie === 'function') setCookie('sound', false, 365);
-                    $('#checkbox-sound')
-                        .removeClass('active')
-                        .find('i').removeClass('fa-volume-up').addClass('fa-volume-mute');
+                    const son = document.querySelector('#checkbox-sound');
+                    son?.classList.remove('active');
+                    basculerIcone(son, 'fa-volume-up', 'fa-volume-mute');
                 }
             } else {
-                $(this).removeClass('turbo-on');
+                this.classList.remove('turbo-on');
             }
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Fullscreen binding
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires the fullscreen toggle button with cross-browser prefixed API support.
@@ -879,7 +1259,7 @@ const UI_Manager = {
      * @returns {void}
      */
     bindFullscreen() {
-        $('#checkbox-fullscreen').off('click').on('click', function () {
+        brancher(document.querySelector('#checkbox-fullscreen'), 'click', function () {
             const isFullscreen = document.fullscreenElement      ||
                                document.mozFullScreenElement   ||
                                document.webkitFullscreenElement;
@@ -888,7 +1268,7 @@ const UI_Manager = {
                              document.mozCancelFullScreen ||
                              document.webkitExitFullscreen;
                 if (exitFn) exitFn.call(document);
-                $(this).find('i').removeClass('fa-compress').addClass('fa-expand');
+                basculerIcone(this, 'fa-compress', 'fa-expand');
             } else {
                 const el    = document.getElementById('emulator-area');
                 const reqFn = el.requestFullscreen ||
@@ -899,15 +1279,15 @@ const UI_Manager = {
                     if (p && p.catch) p.catch(function (e) {
                         console.warn('[Fullscreen] Failed:', e.message);
                     });
-                    $(this).find('i').removeClass('fa-expand').addClass('fa-compress');
+                    basculerIcone(this, 'fa-expand', 'fa-compress');
                 }
             }
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Game page header bindings
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires the game-page header controls: volume slider, joystick toggle,
@@ -919,63 +1299,86 @@ const UI_Manager = {
      * @returns {void}
      */
     bindGameHeader() {
-        $('#volume-slider-ui').on('input', function () {
+        brancher(document.querySelector('#volume-slider-ui'), 'input', function () {
             const val = parseInt(this.value, 10);
-            $('#sound-volume').val(val).trigger('input');
+            const volume = document.querySelector('#sound-volume');
+            if (volume) {
+                volume.value = val;
+                volume.dispatchEvent(new Event('input'));
+            }
             if (typeof Config_Manager !== 'undefined' && typeof Config_Manager.setVolume === 'function') {
                 Config_Manager.setVolume(val / 100);
             }
         });
 
         var _joystickOn = true;
-        $('#btn-joystick').on('click', function () {
+        brancher(document.querySelector('#btn-joystick'), 'click', function () {
             _joystickOn = !_joystickOn;
             if (typeof Config_Manager !== 'undefined') Config_Manager.joystickEnabled = _joystickOn;
+            const caseJoy = document.querySelector('#checkbox-joystick');
             if (_joystickOn) {
-                $('#checkbox-joystick').addClass('active');
-                $(this).removeClass('disabled').attr('title', 'Joystick clavier (actif)');
+                caseJoy?.classList.add('active');
+                this.classList.remove('disabled');
+                this.setAttribute('title', 'Joystick clavier (actif)');
             } else {
-                $('#checkbox-joystick').removeClass('active');
-                $(this).addClass('disabled').attr('title', 'Joystick clavier (désactivé)');
+                caseJoy?.classList.remove('active');
+                this.classList.add('disabled');
+                this.setAttribute('title', 'Joystick clavier (désactivé)');
             }
         });
 
-        var _soundOn = true;
-        $('#btn-sound').on('click', function () {
+        // The initial state comes from the shared preference (`sound` cookie),
+        // not from a hard-coded `true`, so the icon matches the actual state.
+        var _soundOn = (typeof getCookie === 'function') ? (getCookie('sound') !== 'false') : true;
+        if (typeof Config_Manager !== 'undefined') Config_Manager.soundEnabled = _soundOn;
+
+        const boutonSon = document.querySelector('#btn-sound');
+        if (boutonSon) {
+            boutonSon.classList.toggle('muted', !_soundOn);
+            basculerIcone(boutonSon, _soundOn ? 'fa-volume-mute' : 'fa-volume-up',
+                                     _soundOn ? 'fa-volume-up'   : 'fa-volume-mute');
+        }
+
+        brancher(boutonSon, 'click', function () {
             _soundOn = !_soundOn;
             if (typeof Config_Manager !== 'undefined') Config_Manager.soundEnabled = _soundOn;
-            const $btn = $(this);
+            if (typeof setCookie === 'function') setCookie('sound', _soundOn, 365);
+            const caseSon = document.querySelector('#checkbox-sound');
             if (_soundOn) {
-                $btn.removeClass('muted').find('i').removeClass('fa-volume-mute').addClass('fa-volume-up');
+                this.classList.remove('muted');
+                basculerIcone(this, 'fa-volume-mute', 'fa-volume-up');
                 if (typeof Audio_Output !== 'undefined') Audio_Output.Resume().catch(function () {});
-                $('#checkbox-sound').addClass('active').find('i').removeClass('fa-volume-mute').addClass('fa-volume-up');
+                caseSon?.classList.add('active');
+                basculerIcone(caseSon, 'fa-volume-mute', 'fa-volume-up');
             } else {
-                $btn.addClass('muted').find('i').removeClass('fa-volume-up').addClass('fa-volume-mute');
-                $('#checkbox-sound').removeClass('active').find('i').removeClass('fa-volume-up').addClass('fa-volume-mute');
+                this.classList.add('muted');
+                basculerIcone(this, 'fa-volume-up', 'fa-volume-mute');
+                caseSon?.classList.remove('active');
+                basculerIcone(caseSon, 'fa-volume-up', 'fa-volume-mute');
             }
         });
 
-        $('#btn-fullscreen').on('click', function () {
+        brancher(document.querySelector('#btn-fullscreen'), 'click', function () {
             const el  = document.getElementById('emulator-area');
             const isF = document.fullscreenElement || document.webkitFullscreenElement;
             if (isF) {
                 (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-                $(this).find('i').removeClass('fa-compress').addClass('fa-expand');
+                basculerIcone(this, 'fa-compress', 'fa-expand');
             } else {
                 const reqFn = el.requestFullscreen || el.webkitRequestFullscreen;
                 if (reqFn) reqFn.call(el).catch(function (e) { console.warn('[Fullscreen]', e.message); });
-                $(this).find('i').removeClass('fa-expand').addClass('fa-compress');
+                basculerIcone(this, 'fa-expand', 'fa-compress');
             }
         });
 
-        $('#checkbox-fullscreen').off('click').on('click', function () {
-            $('#btn-fullscreen').trigger('click');
+        brancher(document.querySelector('#checkbox-fullscreen'), 'click', function () {
+            document.querySelector('#btn-fullscreen')?.click();
         });
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Tape transport bindings (first mount)
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Wires the tape transport buttons (Play, Record, Rewind, Fast-Forward, Stop)
@@ -992,43 +1395,47 @@ const UI_Manager = {
      * @returns {void}
      */
     bindTapeTransport(TC, disk) {
-        $("#tape-record").on("click", () => {
-            TC.setTapeState(TC.tapePosition < disk.size - 1 ? TC.STATE_RECORD : TC.STATE_STOP);
-        });
-        $("#tape-play").on("click", () => {
-            TC.setTapeState(TC.tapePosition < disk.size - 1 ? TC.STATE_PLAY : TC.STATE_STOP);
-        });
-        $("#tape-rewind").on("click", () => {
-            TC.setTapeState(TC.tapePosition > 0 ? TC.STATE_REWIND : TC.STATE_STOP);
-        });
-        $("#tape-forward").on("click", () => {
-            TC.setTapeState(TC.tapePosition < disk.size - 1 ? TC.STATE_FORWARD : TC.STATE_STOP);
-        });
-        $("#tape-stop").on("click", () => {
-            TC.setTapeState(TC.STATE_STOP);
-        });
+        // The target state is computed at click time, not at binding time.
+        const transport = (selecteur, etat) => {
+            brancher(document.querySelector(selecteur), 'click', () => {
+                TC.setTapeState(typeof etat === 'function' ? etat() : etat);
+            });
+        };
+        const enAvant = (etat) => () => (TC.tapePosition < disk.size - 1 ? etat : TC.STATE_STOP);
+        const enArriere = () => (TC.tapePosition > 0 ? TC.STATE_REWIND : TC.STATE_STOP);
+
+        transport('#tape-record',  enAvant(TC.STATE_RECORD));
+        transport('#tape-play',    enAvant(TC.STATE_PLAY));
+        transport('#tape-rewind',  enArriere);
+        transport('#tape-forward', enAvant(TC.STATE_FORWARD));
+        transport('#tape-stop',    TC.STATE_STOP);
     },
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Audio context resume on first user gesture
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /**
      * Resumes the Web Audio context on the first user interaction event.
      *
-     * ⚠ Do NOT call this method alongside `bindSoundButton()` on the same page.
-     * Both methods call `Audio_Output.Resume()`, which could create a race
-     * condition resulting in a duplicate AudioContext and an unregistered
-     * AudioWorklet.
+     * Called by `bindSoundButton()` when the sound is on at load time: the
+     * autoplay policy forbids creating the context without a gesture.
+     * `Audio_Output.init()` is idempotent (its `_initPromise` lock returns the
+     * pending promise), so a concurrent `Resume()` call never creates a second
+     * `AudioContext` nor an unregistered worklet.
      *
-     * Use only on pages that have no sound button managed by `bindSoundButton()`,
-     * and only when audio should start automatically on the first user gesture.
+     * If the sound is off at the time of the first gesture, nothing is
+     * initialised and the listener removes itself: the sound button then calls
+     * `Resume()` on re-activation.
      *
-     * @param {string} [events='click'] - jQuery event string (e.g. `'click keydown'`).
+     * @param {string|string[]} [events='click'] - Space-separated event list
+     *   (for example `'click keydown'`). The listener fires once, then detaches.
      * @returns {void}
      */
     bindAudioResume(events) {
-        $(document).one(events || 'click', async function () {
+        const types = (events || 'click').split(' ').filter(Boolean);
+        const premier = async function () {
+            for (const type of types) document.removeEventListener(type, premier);
             if (typeof Audio_Output === 'undefined') return;
             if (typeof Config_Manager !== 'undefined' && !Config_Manager.soundEnabled) return;
             if (Audio_Output.isInitialized) {
@@ -1038,6 +1445,7 @@ const UI_Manager = {
                 return;
             }
             try { await Audio_Output.Resume(); } catch (e) { /* silent */ }
-        });
+        };
+        for (const type of types) document.addEventListener(type, premier, { once: true });
     },
 };

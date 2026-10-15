@@ -365,7 +365,9 @@ const ASIC_Manager = {
                 case 1: case 5: case 9: ch.pointer = (value << 8) | (ch.pointer & 0xFF); break;
                 case 2: case 6: case 10: ch.prescalerBase = value; break;
                 case 15:
-                    this._getDmaStatus() = (this._getDmaStatus() & 0x80) | (value & 0x7F);
+                    // Bit 7 is a read-only internal state and is preserved; bits 6-0
+                    // come from the write.
+                    this._setDmaStatus((this._getDmaStatus() & 0x80) | (value & 0x7F));
                     break;
             }
         }
@@ -373,9 +375,9 @@ const ASIC_Manager = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // ASIC_DMA_Controller
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace ASIC_DMA_Controller
@@ -597,9 +599,9 @@ const ASIC_DMA_Controller = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // PriManager
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace PriManager
@@ -770,9 +772,9 @@ const PriManager = {
     },
 };
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // UI integration note (for CPC_Bus.js / UI_DOM.js)
-// =============================================================================
+// ---------------------------------------------------------------------------
 //
 // Implement the following function in UI_DOM.js and wire it into CPC_Bus.js
 // as the updateAsicUI callback:
@@ -782,25 +784,30 @@ const PriManager = {
 //             asicSsaHigh, asicSsaLow, asicSscr, asicHScroll, asicVScroll,
 //             asicLocked, asicRamEnabled, channels } = state;
 //
-//     asicLocked
-//       ? $("#asic_unlocked").removeAttr("checked")
-//       : $("#asic_unlocked").attr("checked", "checked");
-//     asicRamEnabled
-//       ? $("#asic_ram").attr("checked", "checked")
-//       : $("#asic_ram").removeAttr("checked");
+//     const coche = (id, actif) => {
+//       const el = document.getElementById(id);
+//       if (el) el.checked = !!actif;
+//     };
+//     const texte = (id, value) => {
+//       const el = document.getElementById(id);
+//       if (el) el.textContent = value;
+//     };
 //
-//     $("#asic_dcsr").text(toHex8(statusControl));
-//     $("#asic_ivr") .text(toHex8(asicIvr));
-//     $("#asic_pri") .text(toHex8(asicPri));
-//     $("#asic_splt").text(toHex8(asicSplitLine));
-//     $("#asic_ssa") .text(toHex16((asicSsaHigh << 8) | asicSsaLow));
-//     $("#asic_sscr").text(toHex8((asicSscr << 7) | (asicHScroll << 4) | asicVScroll));
+//     coche("asic_unlocked", asicLocked);
+//     coche("asic_ram", asicRamEnabled);
+//
+//     texte("asic_dcsr", toHex8(statusControl));
+//     texte("asic_ivr",  toHex8(asicIvr));
+//     texte("asic_pri",  toHex8(asicPri));
+//     texte("asic_splt", toHex8(asicSplitLine));
+//     texte("asic_ssa",  toHex16((asicSsaHigh << 8) | asicSsaLow));
+//     texte("asic_sscr", toHex8((asicSscr << 7) | (asicHScroll << 4) | asicVScroll));
 //
 //     for (let i = 0; i <= 2; i++) {
 //       const ch = channels[i];
-//       $(`#dma${i}_addr`).text(toHex16(ch.pointer));
-//       $(`#dma${i}_loopAddr`).text(toHex16(ch.loopStart));
-//       $(`#dma${i}_loopCounter`).text(toHex16(ch.loopCount));
+//       texte(`dma${i}_addr`,        toHex16(ch.pointer));
+//       texte(`dma${i}_loopAddr`,    toHex16(ch.loopStart));
+//       texte(`dma${i}_loopCounter`, toHex16(ch.loopCount));
 //     }
 //   }
 //

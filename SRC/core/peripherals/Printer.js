@@ -34,6 +34,13 @@ const VirtualPrinter = {
     _card()   { return document.getElementById('printer-card');   },
 
     /**
+     * Shows the initial waiting state. Called at page start-up, once the DOM is
+     * ready.
+     * @returns {void}
+     */
+    init() { this._showIdle(); },
+
+    /**
      * Returns the printer output container element, or null if absent.
      * @returns {HTMLElement|null}
      */
@@ -49,9 +56,21 @@ const VirtualPrinter = {
     readPort(_addr) { return 0; },
 
     /**
+     * Renders the "waiting for a print job" state, so that an empty area is not
+     * read as a broken parallel port.
+     */
+    _showIdle() {
+        const output = this._output();
+        if (!output || output.querySelector('.printer-line')) return;
+        const attente = document.createElement('div');
+        attente.className = 'printer-idle';
+        attente.textContent = 'En attente d\'une impression…';
+        output.appendChild(attente);
+    },
+
+    /**
      * Renders a completed line of text to the DOM output element,
      * or logs it to the browser console if the DOM element is absent.
-     * Reveals the printer card on first output.
      * Automatically scrolls to the latest line.
      * @param {string} text - Line content to display.
      */
@@ -66,8 +85,8 @@ const VirtualPrinter = {
             return;
         }
 
-        const card = this._card();
-        if (card && card.style.display === 'none') card.style.display = '';
+        // The first printed line replaces the waiting state.
+        output.querySelector('.printer-idle')?.remove();
 
         const line = document.createElement('div');
         line.className = 'printer-line';
@@ -78,14 +97,18 @@ const VirtualPrinter = {
     },
 
     /**
-     * Clears the print buffer, removes all output lines, and hides the card.
+     * Clears the print buffer and removes all output lines.
+     *
+     * The printer card itself stays visible: this button clears the listing,
+     * it does not unplug the device. Hiding it here meant a single mis-click
+     * on « Vider » silently removed the panel, with no way back other than a
+     * reload — and the user had no way to tell that from a missing peripheral.
      */
     clear() {
         this.buffer = "";
         const output = this._output();
         if (output) output.innerHTML = '';
-        const card = this._card();
-        if (card) card.style.display = 'none';
+        this._showIdle();
     },
 
     /**

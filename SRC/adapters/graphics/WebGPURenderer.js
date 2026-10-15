@@ -185,6 +185,10 @@ WebGPURenderer.prototype.init = async function (visibleCanvas, offscreenCanvas, 
     this._height = height || 272;
     if (!navigator.gpu) return false;
     const adapter = await navigator.gpu.requestAdapter();
+    // `requestAdapter()` resolves to `null` when no usable adapter exists: no
+    // GPU, `--disable-gpu`, blacklisted driver, or header only. The contract is
+    // to return `false`, never to throw.
+    if (!adapter) return false;
     this._device = await adapter.requestDevice();
     this._context = visibleCanvas.getContext("webgpu");
     const fmt = navigator.gpu.getPreferredCanvasFormat();

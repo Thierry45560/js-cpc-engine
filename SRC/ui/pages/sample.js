@@ -1,20 +1,20 @@
 /**
  * @file        sample.js
- * @description Catalogue interactif JS CPC — Base de données des jeux,
- *              filtrage, tri, recherche, tooltips et lecture vidéo au survol.
+ * @description JS CPC interactive catalogue — game database, filtering,
+ *              sorting, search, tooltips and video playback on hover.
  * @author      Thierry MAIGNAN
- * @project     JS CPC V2 — L'Amstrad dans votre Navigateur
+ * @project     JS CPC V2 — Amstrad in your browser
  */
 
 'use strict';
 
-/* ── Année dynamique du footer ──────────────────────────────── */
+/* -- Dynamic footer year -------------------------------------- */
 document.getElementById('footer-year').textContent = new Date().getFullYear();
 
-/* ─────────────────────────────────────────────────────────────
-   REGISTRE DES VIGNETTES VIDÉO DISPONIBLES
-   Seuls les fichiers listés ici déclenchent un <video>.
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   VIDEO THUMBNAIL REGISTRY
+   Only the files listed here trigger a <video>.
+   ------------------------------------------------------------- */
 var VIDEOS_EXISTANTES = [
     'BARBARIAN2.CPR', 'BATMANM.CPR',  'BEARS.CPR',    
     'CAULDRON2.CPR',  'CHEVYCHASE.CPR','COPTER271.CPR','CRAZYCARS2.CPR',
@@ -28,25 +28,25 @@ var VIDEOS_EXISTANTES = [
     '1943.SNA',     'ARKANOID.SNA',  'BARBARIAN.DSK', 'BATMAN.DSK',
     'BATMAN.SNA',   'BOMBJACK.SNA',  'BOULDER.SNA',   'BRUCELEE.SNA',
     'BUBBLE.DSK',   'BUGGYBOY.SNA',  'CHASEHQ.SNA',   'CHUCKIE.DSK',
-    'COMMANDO.SNA', 'CYBERNOI.SNA',  'DKONG.SNA',     'DRAGNINJ.SNA',
-    'EXOLON.DSK',   'FRUITY.SNA',    'GNG.CPR',       'GNG.SNA',
-    'GRYZOR.SNA',   'HOH.SNA',       'IKARI.SNA',     'LALD.SNA',
-    'LEMMINGS.DSK', 'MATCHDAY2.DSK', 'NSOUTH_A.DSK',  'NSOUTH_B.DSK',
-    'PHANTOMAS.CPR','POP.DSK',       'RAINBOW.DSK',   'RENEGADE.DSK',
-    'RICK.SNA',     'RICKC.CPR',     'SAB2.DSK',      'SIMCITY.DSK',
-    'SOLOMON.CPR',  'SORCERY.DSK',   'SORCERY1.DSK',  'SPINDIZZY.DSK',
-    'TENNIS.CPR',   'TETRIS.DSK',    'TITANICB.CPR',  'TURRICAN.DSK',
-    'YIEAR.CPR'
+    'COMMANDO.SNA', 'CRAFTON.DSK',   'CYBERNOI.SNA',  'DIZZY.DSK',
+    'DKONG.SNA',    'DRAGNINJ.SNA',  'EXOLON.DSK',    'FRUITY.SNA',
+    'GNG.CPR',      'GNG.SNA',       'GRYZOR.SNA',    'HOH.SNA',
+    'IKARI.SNA',    'LALD.SNA',      'LEMMINGS.DSK',  'MATCHDAY2.DSK',
+    'NEBULUS.DSK',  'NSOUTH_A.DSK',  'NSOUTH_B.DSK',  'PHANTOMAS.CPR',
+    'POP.DSK',      'RAINBOW.DSK',   'RENEGADE.DSK',  'RICK.SNA',
+    'RICKC.CPR',    'SAB2.DSK',      'SIMCITY.DSK',   'SOLOMON.CPR',
+    'SORCERY.DSK',  'SORCERY1.DSK',  'SPINDIZZY.DSK', 'TENNIS.CPR',
+    'TETRIS.DSK',   'TITANICB.CPR',  'TURRICAN.DSK',  'YIEAR.CPR'
 ];
 
-/* ─────────────────────────────────────────────────────────────
-   BASE DE DONNÉES — Jeux et Démos
+/* -------------------------------------------------------------
+   DATABASE — Games and Demos
    type : "disc" | "snap" | "cart"
    cat  : "Action" | "Arcade" | "Platform" | "RPG" |
-          "Puzzle" | "Sport" | "Demo" | "Strategie"
-   ───────────────────────────────────────────────────────────── */
+          "Puzzle" | "Sport" | "Demo" | "Strategy"
+   ------------------------------------------------------------- */
 var GAMES = [
-    // ── DISQUETTES DSK ───────────────────────────────────────
+    // -- DISQUETTES DSK ---------------------------------------
     { title:'Barbarian',         file:'BARBARIAN.DSK',  type:'disc', cat:'Action',    year:1987, icon:'fa-skull-crossbones',
       desc:'Combattez sans pitié dans ce jeu de duel en arène devenu légendaire pour sa violence. Tranchez des têtes, esquivez les attaques et terrassez le terrible sorcier Drax.' },
     { title:'Target: Renegade',  file:'RENEGADE.DSK',   type:'disc', cat:'Action',    year:1988, icon:'fa-hand-fist',
@@ -84,7 +84,7 @@ var GAMES = [
     { title:'Crafton & Xunk',    file:'CRAFTON.DSK',    type:'disc', cat:'Puzzle',    year:1986, icon:'fa-robot',
       desc:'Contrôlez un androïde et son fidèle pod dans cette merveille de science-fiction en 3D isométrique. Poussez des objets et résolvez des énigmes pour survivre.' },
 
-    // ── SNAPSHOTS SNA ────────────────────────────────────────
+    // -- SNAPSHOTS SNA ----------------------------------------
     { title:'1943',              file:'1943.SNA',       type:'snap', cat:'Arcade',    year:1988, icon:'fa-plane',
       desc:'Prenez les commandes d\'un chasseur P-38 Lightning au-dessus de l\'océan Pacifique. Affrontez des flottes entières dans ce shoot \'em up frénétique.' },
     { title:'Arkanoid',          file:'ARKANOID.SNA',   type:'snap', cat:'Arcade',    year:1987, icon:'fa-table-tennis-paddle-ball',
@@ -124,7 +124,7 @@ var GAMES = [
     { title:'Live and Let Die',  file:'LALD.SNA',       type:'snap', cat:'Action',    year:1988, icon:'fa-ship',
       desc:'Aux commandes d\'un hors-bord ultra-rapide, remontez les cours d\'eau en esquivant les mines et les tirs. Un jeu d\'action et de réflexes exigeant.' },
 
-    // ── CARTOUCHES CPR ───────────────────────────────────────
+    // -- CARTOUCHES CPR ---------------------------------------
     { title:'77 Attempts Plus',  file:'77ATTEMPTS.CPR', type:'cart', cat:'Platform',  year:2021, icon:'fa-person-running',
       desc:'Un jeu de plateforme hardcore très moderne. Vous disposez de 77 tentatives pour réussir à traverser des tableaux aux sauts millimétrés et aux pièges sadiques.' },
     { title:'Abbey Of Crime',    file:'ABBEY.CPR',      type:'cart', cat:'RPG',       year:1987, icon:'fa-church',
@@ -261,7 +261,7 @@ var GAMES = [
       desc:'Le père de tous les jeux de combat, entièrement modernisé pour la gamme Plus. Affrontez des maîtres martiaux aux styles très variés.' }
 ];
 
-/* ── Tables de correspondance ───────────────────────────────── */
+/* -- Tables de correspondance --------------------------------- */
 var CAT_COLORS = {
     'Action':    'var(--cat-action)',
     'Arcade':    'var(--cat-arcade)',
@@ -279,12 +279,12 @@ var MEDIA = {
     cart: { icon:'fa-gamepad',      label:'CPR', cls:'mb-cart' }
 };
 
-/* ── État de l'interface ────────────────────────────────────── */
+/* -- UI state ------------------------------------------------- */
 var state = { cat:'all', media:'all', search:'', sort:'alpha' };
 
-/* ─────────────────────────────────────────────────────────────
-   UTILITAIRE — Échappement HTML
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   HELPER — HTML escaping
+   ------------------------------------------------------------- */
 function esc(s) {
     if (!s) return '';
     return s.replace(/&/g, '&amp;')
@@ -294,9 +294,9 @@ function esc(s) {
             .replace(/'/g, '&#39;');
 }
 
-/* ─────────────────────────────────────────────────────────────
-   RENDU — Tags de filtres actifs
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   RENDER — active filter tags
+   ------------------------------------------------------------- */
 function renderActiveTags() {
     var wrap = document.getElementById('active-tags');
     wrap.innerHTML = '';
@@ -315,9 +315,9 @@ function renderActiveTags() {
     }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* -------------------------------------------------------------
    RENDU — Construction d'une carte de jeu
-   ───────────────────────────────────────────────────────────── */
+   ------------------------------------------------------------- */
 function buildCard(g, i) {
     var m           = MEDIA[g.type] || MEDIA.disc;
     var col         = CAT_COLORS[g.cat] || 'var(--primary)';
@@ -331,9 +331,9 @@ function buildCard(g, i) {
 
     var videoHTML = thumbHTML;
     if (hasVideo) {
-        var videoUrl = 'thumbnail/' + encodeURIComponent(primaryFile) + '.mp4#t=2';
-        videoHTML += '<video class="card-video" loop muted playsinline preload="auto" ' +
-                     'disablePictureInPicture controlslist="nodownload" onloadeddata="initVideo(this)">' +
+        var videoUrl = 'thumbnail/' + encodeURIComponent(primaryFile) + '.mp4';
+        videoHTML += '<video class="card-video" loop muted playsinline preload="none" ' +
+                     'disablePictureInPicture controlslist="nodownload">' +
                      '<source src="' + videoUrl + '" type="video/mp4">' +
                      '</video>';
     }
@@ -348,7 +348,6 @@ function buildCard(g, i) {
         '<div class="card-visual">' +
             videoHTML +
             '<span class="card-idx">#' + String(i + 1).padStart(2, '0') + '</span>' +
-            // LIGNE CORRIGÉE CI-DESSOUS :
             '<span class="media-badge ' + m.cls + '">' + m.label + '</span>' + 
             '<i class="fas ' + g.icon + ' main-icon"></i>' +
         '</div>' +
@@ -361,12 +360,18 @@ function buildCard(g, i) {
         '</div>' +
         '<div class="card-play-btn"><i class="fas fa-play"></i> Jouer</div>';
 
+    if (hasVideo) {
+        var visual = a.querySelector('.card-visual');
+        visual.addEventListener('mouseenter', function () { showVideo(visual); });
+        visual.addEventListener('mouseleave', function () { hideVideo(visual); });
+    }
+
     return a;
 }
 
-/* ─────────────────────────────────────────────────────────────
-   RENDU — Grille complète (filtre + tri)
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   RENDER — full grid (filter + sort)
+   ------------------------------------------------------------- */
 function render() {
     var list = GAMES.slice();
 
@@ -407,17 +412,78 @@ function render() {
     renderActiveTags();
 }
 
-/* ─────────────────────────────────────────────────────────────
-   VIDÉO — Initialisation au chargement (frame 2s)
-   ───────────────────────────────────────────────────────────── */
-function initVideo(video) {
-    video.currentTime = 2;
-    video.classList.add('active');
+/* -------------------------------------------------------------
+   VIDEO — preview on hover
+
+   The video is a layer *above* the PNG, so whatever it paints wins. Two
+   things must hold, otherwise the card turns black:
+
+     1. the reveal waits for a decoded frame. Otherwise the element is
+        shown while the frame is still being sought and paints an empty
+        black box over the thumbnail;
+     2. the frame shown is not the recording's opening one. Measured on the
+        80 videos, most open on a black "screen off" frame.
+
+   Hence the two guards below: reveal on `loadeddata`/`seeked`, and seek to
+   VIDEO_START before revealing.
+   ------------------------------------------------------------- */
+/* Preview start offset.
+   The recordings open on a black "screen off" frame whose length varies
+   from one game to the next: measured over the 80 videos, only 27 render a
+   readable picture at 0 s, 49 at 0.5 s, 53 at 1 s and 50 at 2 s. One second
+   is therefore the point where the most cards are already lit. The videos
+   still dark at 1 s are those whose game screen is dark anyway — their PNG
+   is as dark (TINTIN.CPR 5/255, CHUCKIE.DSK 9/255, BEARS.CPR 17/255). */
+var VIDEO_START = 1;
+
+/**
+ * Shows the video of a card, once it is actually decoded.
+ * @param {HTMLElement} visual `.card-visual` hosting the `.card-video`
+ */
+function showVideo(visual) {
+    var video = visual.querySelector('.card-video');
+    if (!video) return;
+
+    if (video.readyState >= 2) { reveal(visual, video); return; }   // frame already decoded
+
+    var onFrame = function () {
+        video.removeEventListener('loadeddata', onFrame);
+        video.removeEventListener('seeked', onFrame);
+        reveal(visual, video);
+    };
+    video.addEventListener('loadeddata', onFrame);
+    video.addEventListener('seeked', onFrame);
+
+    // `preload="none"`: positioning also triggers the download
+    video.currentTime = VIDEO_START;
 }
 
-/* ─────────────────────────────────────────────────────────────
-   RESET — Remise à zéro de tous les filtres
-   ───────────────────────────────────────────────────────────── */
+/**
+ * Reveals (and plays) the video — unless the pointer already left while the
+ * frame was being decoded.
+ * @param {HTMLElement} visual
+ * @param {HTMLVideoElement} video
+ */
+function reveal(visual, video) {
+    if (!visual.matches(':hover')) return;
+    video.classList.add('active');
+    video.play();
+}
+
+/**
+ * Hides the video and returns to the PNG layer.
+ * @param {HTMLElement} visual
+ */
+function hideVideo(visual) {
+    var video = visual.querySelector('.card-video');
+    if (!video) return;
+    video.classList.remove('active');
+    video.pause();
+}
+
+/* -------------------------------------------------------------
+   RESET — clear all filters
+   ------------------------------------------------------------- */
 function resetFilters() {
     state = { cat:'all', media:'all', search:'', sort:'alpha' };
     document.getElementById('search-input').value = '';
@@ -428,9 +494,9 @@ function resetFilters() {
     render();
 }
 
-/* ─────────────────────────────────────────────────────────────
-   ÉVÉNEMENTS — Filtres catégorie
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   EVENTS — category filters
+   ------------------------------------------------------------- */
 document.getElementById('filter-cat').addEventListener('click', function (e) {
     var btn = e.target.closest('.filter-pill');
     if (!btn) return;
@@ -440,7 +506,7 @@ document.getElementById('filter-cat').addEventListener('click', function (e) {
     render();
 });
 
-/* ── Filtres média ───────────────────────────────────────────── */
+/* -- Media filters --------------------------------------------- */
 document.getElementById('filter-media').addEventListener('click', function (e) {
     var btn = e.target.closest('.filter-pill');
     if (!btn) return;
@@ -450,13 +516,13 @@ document.getElementById('filter-media').addEventListener('click', function (e) {
     render();
 });
 
-/* ── Tri ─────────────────────────────────────────────────────── */
+/* -- Sorting --------------------------------------------------- */
 document.getElementById('sort-select').addEventListener('change', function () {
     state.sort = this.value;
     render();
 });
 
-/* ── Recherche (debounce 180 ms) ─────────────────────────────── */
+/* -- Recherche (debounce 180 ms) ------------------------------- */
 var _searchTimer;
 document.getElementById('search-input').addEventListener('input', function () {
     var v = this.value;
@@ -464,7 +530,7 @@ document.getElementById('search-input').addEventListener('input', function () {
     _searchTimer = setTimeout(function () { state.search = v; render(); }, 180);
 });
 
-/* ── Raccourcis clavier — "/" focus, "Escape" reset ──────────── */
+/* -- Keyboard shortcuts — "/" focus, "Escape" reset ------------ */
 document.addEventListener('keydown', function (e) {
     var inp = document.getElementById('search-input');
     if (e.key === '/' && document.activeElement !== inp) {
@@ -480,13 +546,13 @@ document.addEventListener('keydown', function (e) {
     }
 });
 
-/* ─────────────────────────────────────────────────────────────
-   TOOLTIP & VIDÉO — Survol de la grille
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   TOOLTIP & VIDEO — grid hover
+   ------------------------------------------------------------- */
 var tooltip = document.getElementById('game-tooltip');
 var grid    = document.getElementById('games-grid');
 
-/** Suit la souris pour positionner le tooltip. */
+/** Follows the mouse to position the tooltip. */
 grid.addEventListener('mousemove', function (e) {
     if (!tooltip.classList.contains('visible')) return;
     var x  = e.clientX + 16;
@@ -511,13 +577,13 @@ grid.addEventListener('mouseover', function (e) {
         tooltip.classList.add('visible');
     }
 
-    // 2. Gestion conditionnelle Image / Vidéo
+    // 2. Conditional image / video handling
     var video = card.querySelector('.card-video');
     var img   = card.querySelector('.card-thumbnail');
 
-    // On ne cache l'image QUE si l'élément vidéo existe dans le DOM
+    // The image is hidden only when the video element exists in the DOM
     if (video) {
-        if (img) img.style.opacity = '0'; // On cache l'image
+        if (img) img.style.opacity = '0'; // Hide the image
         video.play().catch(function () {});
     }
 });
@@ -534,11 +600,11 @@ grid.addEventListener('mouseout', function (e) {
     if (video) {
         video.pause();
     }
-    // On réaffiche toujours l'image en sortant (si elle existe)
+    // Always show the image again on exit (if it exists)
     if (img) img.style.opacity = '1';
 });
 
-/* ── Sécurité : retire les <video> dont la source MP4 est absente ── */
+/* -- Safety: remove <video> whose MP4 source is missing ------------ */
 document.addEventListener('error', function (e) {
     if (e.target.tagName === 'SOURCE') {
         var video = e.target.parentNode;
@@ -546,7 +612,7 @@ document.addEventListener('error', function (e) {
     }
 }, true);
 
-/* ─────────────────────────────────────────────────────────────
+/* -------------------------------------------------------------
    INITIALISATION
-   ───────────────────────────────────────────────────────────── */
+   ------------------------------------------------------------- */
 render();

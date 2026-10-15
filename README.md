@@ -18,7 +18,7 @@ Il est conçu pour être **totalement modulaire** : chaque composant (CPU Z80, p
 ### 🎯 Précision Chirurgicale
 
 - **ZEXALL Ready :** Le cœur du processeur **Z80** a passé avec succès l'intégralité des tests de conformité **ZEXALL**, garantissant une émulation parfaite de chaque instruction, flag et comportement documenté (ou non).
-- **Cycle-Accurate :** Une attention particulière a été portée aux timings pour assurer la compatibilité avec les démos les plus exigeantes du CPC+.
+- **Timings pilotés au cycle interne :** Le décompte des T-states suit un modèle de « cycles internes » propre au moteur (suffisant pour piloter le CRTC et l'affichage), et non une reproduction cycle par cycle de la durée matérielle du Z80. La conformité *sémantique* est, elle, certifiée par ZEXALL.
 
 ### 🏗️ Architecture Modulaire
 
@@ -35,7 +35,7 @@ Le projet est construit comme un ensemble de briques indépendantes :
 
 | Composant | Détails de l'émulation |
 | :--- | :--- |
-| **CPU** | Zilog Z80 (ZEXALL Passed) |
+| **CPU** | Zilog Z80 (ZEXALL 67/67 — conformité sémantique) |
 | **Vidéo** | Gate Array, ASIC (CPC+), CRTC (tous types émulés), rendu WebGPU / Canvas 2D |
 | **Audio** | AY-3-8910 (WebAudio API) |
 | **Périphériques** | PPI 8255, FDC (Floppy), Clavier, Joystick |
@@ -45,10 +45,10 @@ Le projet est construit comme un ensemble de briques indépendantes :
 
 ## 📂 Structure du Projet
 
-Le cœur de l'émulateur se trouve dans le dossier `/js` :
+Le moteur vit dans `SRC/`, à la racine du dépôt :
 
 ```text
-js/
+SRC/
 ├── core/
 │   ├── cpu/          # Le cœur Z80 (Zexall validated)
 │   ├── audio/        # Émulation sonore AY-3-8910
@@ -60,11 +60,21 @@ js/
 └── tools/            # Utilitaires (parsing de fichiers, formats)
 ```
 
+`SRC/` est la seule copie éditée à la main. Les pages du site chargent leurs
+scripts par des chemins relatifs (`js/core/cpu/Z80.js`) : elles consomment donc
+un miroir `site/js/`, régénéré depuis `SRC/`. `npm run sync:site` l'écrit,
+`npm run check:site` vérifie que les deux copies sont identiques — c'est le
+contrôle à passer avant tout transfert chez l'hébergeur.
+
+Le dossier `site/` — pages HTML, styles, bibliothèques tierces, ROM et données
+de jeux — **n'est pas versionné ici** : il est transféré sur [www.js-cpc.fr](https://www.js-cpc.fr),
+le moteur ci-dessus restant la source publiée.
+
 ---
 
 ## 🚀 Utilisation Rapide
 
-Le moteur fonctionne sur un modèle de **singletons globaux** chargés séquentiellement via `loader.js`. Il n'expose **pas** d'API de classe importable — chaque module s'enregistre dans le scope global dans un ordre strict de dépendances.
+Le moteur fonctionne sur un modèle de **singletons globaux** chargés séquentiellement par des balises `<script>` déclarées dans l'ordre strict des dépendances. Il n'expose **pas** d'API de classe importable — chaque module s'enregistre dans le scope global. Le fichier `examples/cpc-minimal.html` donne la liste de référence.
 
 ### 1. Structure HTML minimale
 
@@ -72,8 +82,8 @@ Le moteur fonctionne sur un modèle de **singletons globaux** chargés séquenti
 <!DOCTYPE html>
 <html>
 <head>
-  <!-- jQuery (dépendance obligatoire) -->
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <!-- Aucune dépendance JavaScript : le DOM utilise les API natives
+       (querySelector, addEventListener, classList, Web Animations API). -->
 </head>
 <body>
 
@@ -97,20 +107,19 @@ Le moteur fonctionne sur un modèle de **singletons globaux** chargés séquenti
     <option value="boot_6128plus">GX4000 / CPC 6128+</option>
   </select>
 
-  <!-- Chargement séquentiel de tous les modules -->
-  <script src="js/core/system/loader.js"></script>
+  <!-- Chargement séquentiel de tous les modules : reprendre la liste ordonnée
+       de <script src> de examples/cpc-minimal.html -->
 
 </body>
 </html>
 ```
 
-> **Pourquoi `loader.js` et pas des `import` ?**
+> **Pourquoi des `<script>` et pas des `import` ?**
 > Les 30 modules du moteur partagent des singletons globaux (`CPU_Z80`, `Config_Manager`, `Audio_Output`…).
-> Ils doivent être exécutés dans un ordre strict de dépendances. `loader.js` garantit cet ordre en injectant
-> des balises `<script async=false>` séquentiellement.
+> Ils doivent être exécutés dans un ordre strict de dépendances, que l'ordre des balises `<script>` garantit.
 
-`Emulator_Setup.js` (chargé en dernier par `loader.js`) appelle automatiquement `AppMain.reset()` et
-`AppMain.loadInitialRoms()` dans le `$(document).ready`. Il n'y a **rien d'autre à écrire** pour obtenir
+`Emulator_Setup.js` (chargé en dernier) appelle automatiquement `AppMain.reset()` et
+`AppMain.loadInitialRoms()` dès que le DOM est prêt. Il n'y a **rien d'autre à écrire** pour obtenir
 le prompt BASIC du CPC, dès que les fichiers `ROM/` sont présents.
 
 ---
@@ -131,8 +140,9 @@ xhr.onload = function () {
     // Option A — Disquette .DSK → Lecteur A
     Floppy_Drive_A.diskImage = DSK_Parser.parseFile(data);
     setTimeout(function () {
-        AutoType.inject('RUN"monJeu.bas\r'); // tape la commande après le prompt BASIC
-    }, 2000);
+        // L'injection elle-même avance ensuite sur les frames/VBL émulées.
+        CPC_INPUT.keyboard.autotype('RUN"monJeu.bas\r');
+    }, 2000); // délai de démarrage, pas le timing de frappe
 
     // Option B — Snapshot .SNA
     // SNA_Parser.parseFile(data);
@@ -169,9 +179,24 @@ Config_Manager.setVolume(80);
 
 ---
 
-### 4. Son — activation via geste utilisateur
+### 4. Son — démarré au premier geste, sans rien manipuler
 
-Les navigateurs bloquent l'audio sans interaction préalable. Appelez `Audio_Output.Resume()` depuis un gestionnaire de clic :
+Les navigateurs interdisent de créer un `AudioContext` sans interaction
+préalable : un contexte ouvert au chargement reste `suspended` et ne produit
+rien. Les pages de l'émulateur n'ont rien à faire — `UI_Manager.bindSoundButton()`
+(appelé par `Emulator_Setup.js`) arme `bindAudioResume()` dès que le son est
+actif, et le contexte naît donc au PREMIER geste (clic, touche), sans passer par
+le bouton son. Ce n'était pas le cas auparavant : la page restait muette, icône
+« son actif » comprise, jusqu'à ce que l'utilisateur coupe puis réactive le son.
+Verrouillé par `tests/browser/audio-son-chromium.spec.mjs`.
+
+Sur une page qui n'utilise pas `bindSoundButton()`, armez l'écouteur vous-même :
+
+```javascript
+UI_Manager.bindAudioResume('pointerdown keydown');   // un seul geste, puis l'écouteur se retire
+```
+
+Ou appelez `Audio_Output.Resume()` depuis votre propre gestionnaire de geste :
 
 ```javascript
 document.getElementById('monBoutonPlay').addEventListener('click', async function () {
@@ -179,6 +204,10 @@ document.getElementById('monBoutonPlay').addEventListener('click', async functio
     Emulator_Core.resumeEmulator();  // lance la boucle d'émulation
 });
 ```
+
+Les appels concurrents sont sans danger : `Audio_Output.init()` est idempotent
+(verrou `_initPromise`), un second appel renvoie la promesse en cours au lieu de
+créer un second `AudioContext`.
 
 ---
 
@@ -196,19 +225,45 @@ ROM/
 └── AMSDOS_0.5.ROM      ← DOS disquette (commun à tous les modèles)
 ```
 
-La langue est lue dans le cookie `firmware` (`english` par défaut). Les ROMs sont chargées automatiquement par `ROM_Manager.loadROMs()` au démarrage.
+La langue est lue dans le cookie `firmware` (`english` par défaut). Les ROMs sont chargées automatiquement par `ROM_Manager.loadROMs()` au démarrage. **Changer de firmware depuis la fenêtre de configuration purge le cache des ROM et recharge la page automatiquement** : le firmware injecte du code et modifie l'état global de dizaines d'objets, que rejouer à chaud laissait incohérent — il ne restait donc qu'à reconstruire le contexte JavaScript. Le cookie est écrit AVANT le rechargement, sans quoi la page repartirait sur le firmware précédent. Verrouillé par `tests/system/config-rom.test.mjs`.
 
 ---
 
 ## 🛠️ Usage Node.js — Sans navigateur
 
-Pour des usages hors navigateur (catalogage, outils CLI, tests), les parseurs peuvent être extraits indépendamment du moteur. Exemple : cataloguer une disquette `.DSK` sans ROM, ni audio, ni canvas :
+Pour des usages hors navigateur (catalogage, outils CLI, tests), les parseurs peuvent être extraits indépendamment du moteur : aucune ROM, aucun audio, aucun canvas n'est requis pour lire une disquette `.DSK` ou un snapshot `.SNA`.
+
+Ces modules sont des **scripts classiques** (`SRC/core/peripherals/DSK_Parser.js` déclare `DSK_Parser` dans le scope global, sans `export`) : ils ne s'importent pas, ils s'évaluent. `tests/helpers/z80-harness.mjs` montre la technique — lecture du fichier puis `vm.runInThisContext` avec un `filename`, ce qui évite toute transformation du code et laisse la couverture attribuée au bon fichier.
+
+---
+
+## ✅ Tests
+
+Ce dépôt publie les suites du **cœur Z80** et de **ZEXALL** : `tests/z80/`,
+leurs harnais (`z80-harness.mjs`, `z80-reference.mjs`, `zexall-runner.mjs`) et la
+fixture `tests/fixtures/zexall.com`. Ce sont les suites qui accompagnent le
+moteur.
 
 ```bash
-node catalogue_dsk.js monJeu.dsk
+npm install
+npm run test:zexall   # conformité Z80 complète (~4 min, opt-in)
 ```
 
-Voir [`catalogue_dsk.js`](catalogue_dsk.js) pour un exemple complet autonome (zéro dépendance npm).
+### ZEXALL — conformité du cœur Z80
+
+[ZEXALL](https://github.com/agn453/ZEXALL) est **la** référence de conformité du cœur Z80 : 67 tests couvrant l'intégralité des opcodes, des drapeaux et des comportements documentés (ou non) par le constructeur. Le binaire `tests/fixtures/zexall.com` est embarqué, et son SHA-256 est vérifié au chargement.
+
+ZEXALL est **opt-in** et volontairement absent de `npm test` : il exécute ~5,7 milliards d'instructions et prend environ 4 minutes.
+
+```bash
+npm run test:zexall
+```
+
+Le run en cours de référence : **67/67, 0 erreur, 5 764 195 500 instructions, 14 116 426 828 T-states.**
+
+Ces compteurs sont **identiques** avant et après le correctif des opcodes `ED` non documentés : la modification n'altère rien de ce que ZEXALL mesure.
+
+Note : ZEXALL contrôle la *sémantique* (registres, drapeaux, mémoire), pas la *durée*. Le comptage des T-states suit un modèle de cycles internes propre au moteur — voir « Précision Chirurgicale » plus haut.
 
 ---
 

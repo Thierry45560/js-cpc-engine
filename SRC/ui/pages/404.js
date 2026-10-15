@@ -1,27 +1,24 @@
 /**
  * @file        404.js
- * @description Page d'erreur 404 — Affichage de l'URL erronée,
- *              animation typewriter dans le faux écran CPC et
- *              année dynamique du footer.
+ * @description 404 error page: shows the wrong URL, runs a typewriter animation
+ *              in the fake CPC screen and sets the footer year.
  * @author      Thierry MAIGNAN
- * @project     JS CPC V2 — L'Amstrad dans votre Navigateur
+ * @project     JS CPC V2 — Amstrad in your browser
  */
 
 'use strict';
 
-/* ── Année dynamique du footer ──────────────────────────────── */
+/* Dynamic footer year */
 document.getElementById('footer-year').textContent = new Date().getFullYear();
 
-/* ── Affichage de l'URL erronée ─────────────────────────────── */
+/* Show the wrong URL */
 var path = window.location.pathname;
 document.getElementById('bad-url').textContent = path || '/???';
 
-/* ─────────────────────────────────────────────────────────────
-   Animation typewriter — Saisie du chemin dans le prompt CPC
-   Affiche le pathname caractère par caractère, style terminal.
-   ───────────────────────────────────────────────────────────── */
+/* Typewriter animation: types the path into the CPC prompt, character by
+   character, terminal style. */
 (function typewriterPath() {
-    var text  = path.length > 30 ? path.slice(-30) : path; // max 30 caractères
+    var text  = path.length > 30 ? path.slice(-30) : path; // max 30 characters
     var el    = document.getElementById('typed-path');
     var i     = 0;
 

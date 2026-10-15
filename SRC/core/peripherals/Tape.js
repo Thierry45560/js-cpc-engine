@@ -15,14 +15,56 @@
  *   - TapeController patches (CSS states, motor relay indicator, eject cleanup)
  *   - DOM bindings        — delegated to UI_Manager.bindTape()
  *
- * Global dependencies: jQuery ($), Emulator_Core (via Emulator_Setup.js), UI_Manager
+ * Global dependencies: Emulator_Core (via Emulator_Setup.js), UI_Manager
  */
 
 "use strict";
 
-// =============================================================================
+// ---------------------------------------------------------------------------
+// DOM helpers (migration jQuery → DOM natif)
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies CSS classes to every element matching the selector.
+ *
+ * @param {string} selecteur CSS selector.
+ * @param {{remove?: string[], add?: string[]}} classes Classes to remove / add.
+ * @returns {void}
+ */
+function poserClasses(selecteur, { remove = [], add = [] } = {}) {
+    document.querySelectorAll(selecteur).forEach((noeud) => {
+        remove.forEach((c) => noeud.classList.remove(c));
+        add.forEach((c) => noeud.classList.add(c));
+      });
+}
+
+/**
+ * Listener registry of this module, per element, so that listeners can be
+ * removed later.
+ *
+ * @type {WeakMap<EventTarget, Map<string, Function>>}
+ */
+const _tapeEcouteurs = new WeakMap();
+
+/**
+ * Removes the listeners registered in `_tapeEcouteurs` from the matching
+ * elements.
+ *
+ * @param {string} selecteur CSS selector.
+ * @returns {void}
+ */
+function detacherTape(selecteur) {
+    document.querySelectorAll(selecteur).forEach((cible) => {
+        const table = _tapeEcouteurs.get(cible);
+        if (!table) return;
+        for (const [type, fn] of table) cible.removeEventListener(type, fn);
+        table.clear();
+      });
+}
+
+// ---------------------------------------------------------------------------
 // WAV_Parser
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace WAV_Parser
@@ -100,9 +142,9 @@ const WAV_Parser = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Base64_Utils
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace Base64_Utils
@@ -164,9 +206,9 @@ const Base64_Utils = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // TapeBlockScanner
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace TapeBlockScanner
@@ -360,9 +402,9 @@ const TapeBlockScanner = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // TapeController
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace TapeController
@@ -593,39 +635,37 @@ const TapeController = {
 
             case this.STATE_EMPTY:
                 this.tapeBitOut = 0;
-                $("#tape-record, #tape-play, #tape-rewind, #tape-forward, #tape-stop")
-                    .removeClass("button toggled-button")
-                    .addClass("disabled-button")
-                    .off("click");
+                detacherTape("#tape-record, #tape-play, #tape-rewind, #tape-forward, #tape-stop");
+                poserClasses("#tape-record, #tape-play, #tape-rewind, #tape-forward, #tape-stop",
+                    { remove: ["button", "toggled-button"], add: ["disabled-button"] });
                 break;
 
             case this.STATE_RECORD:
-                $("#tape-play, #tape-rewind, #tape-forward").removeClass("toggled-button");
-                $("#tape-record").addClass("toggled-button");
+                poserClasses("#tape-play, #tape-rewind, #tape-forward", { remove: ["toggled-button"] });
+                poserClasses("#tape-record", { add: ["toggled-button"] });
                 break;
 
             case this.STATE_PLAY:
-                $("#tape-record, #tape-rewind, #tape-forward").removeClass("toggled-button");
-                $("#tape-play").addClass("toggled-button");
+                poserClasses("#tape-record, #tape-rewind, #tape-forward", { remove: ["toggled-button"] });
+                poserClasses("#tape-play", { add: ["toggled-button"] });
                 break;
 
             case this.STATE_REWIND:
                 this.tapeBitOut = 0;
-                $("#tape-record, #tape-play, #tape-forward").removeClass("toggled-button");
-                $("#tape-rewind").addClass("toggled-button");
+                poserClasses("#tape-record, #tape-play, #tape-forward", { remove: ["toggled-button"] });
+                poserClasses("#tape-rewind", { add: ["toggled-button"] });
                 break;
 
             case this.STATE_FORWARD:
                 this.tapeBitOut = 0;
-                $("#tape-record, #tape-rewind, #tape-play").removeClass("toggled-button");
-                $("#tape-forward").addClass("toggled-button");
+                poserClasses("#tape-record, #tape-rewind, #tape-play", { remove: ["toggled-button"] });
+                poserClasses("#tape-forward", { add: ["toggled-button"] });
                 break;
 
             case this.STATE_STOP:
                 this.tapeBitOut = 0;
-                $("#tape-record, #tape-play, #tape-rewind, #tape-forward, #tape-stop")
-                    .removeClass("disabled-button toggled-button")
-                    .addClass("button");
+                poserClasses("#tape-record, #tape-play, #tape-rewind, #tape-forward, #tape-stop",
+                    { remove: ["disabled-button", "toggled-button"], add: ["button"] });
 
                 if (this.tapeState === this.STATE_EMPTY) {
                     const disk = Tape_Recorder.diskImage;
@@ -639,9 +679,9 @@ const TapeController = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Drive descriptor
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace Tape_Recorder
@@ -670,9 +710,9 @@ const Tape_Recorder = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // WAV export helper
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * Writes an ASCII string into a DataView at the given byte offset.
@@ -688,9 +728,9 @@ function writeString(view, offset, string) {
 }
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // WAV export
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * Exports the current Tape_Recorder contents as a downloadable WAV file.
@@ -760,9 +800,9 @@ function downloadTapeAsWav(tapeData) {
 }
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Tape block UI
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * Cache of detected tape blocks for the currently loaded tape.
@@ -779,10 +819,12 @@ let _tapeBlocks = [];
  */
 function renderTapeBlocks(blocks) {
     _tapeBlocks = blocks || [];
-    const $el   = $('#tape-programs');
+    const el = document.querySelector('#tape-programs');
+    if (!el) return;
 
     if (!_tapeBlocks.length) {
-        $el.html('<div class="tape-analyzing">No blocks detected</div>').show();
+        el.innerHTML = '<div class="tape-analyzing">No blocks detected</div>';
+        el.style.display = '';
         return;
     }
 
@@ -799,13 +841,22 @@ function renderTapeBlocks(blocks) {
                `</div>`;
     }).join('');
 
-    $el.html(rows).show();
+    el.innerHTML = rows;
+    el.style.display = '';
 
-    $el.find('.tape-prog-item').off('click').on('click', function () {
-        const pos = parseInt($(this).data('pos'), 10);
+    // The render is redone on every analysis: detach the previous listeners
+    // first.
+    el.querySelectorAll('.tape-prog-item').forEach((item) => {
+        const ancien = _tapeEcouteurs.get(item);
+        if (ancien) item.removeEventListener('click', ancien);
+        const fn = function () {
+            const pos = parseInt(this.dataset.pos, 10);
         TapeController.tapePosition = pos;
         TapeController.updateTapeUI();
         highlightTapeBlock(pos);
+          };
+        _tapeEcouteurs.set(item, fn);
+        item.addEventListener('click', fn);
     });
 }
 
@@ -815,13 +866,15 @@ function renderTapeBlocks(blocks) {
  * @param {number} pos - Current tape position in 125 kHz samples.
  */
 function highlightTapeBlock(pos) {
-    $('#tape-programs .tape-prog-item').removeClass('active');
+    document.querySelectorAll('#tape-programs .tape-prog-item')
+        .forEach((n) => n.classList.remove('active'));
     let best = -1;
     for (let i = _tapeBlocks.length - 1; i >= 0; i--) {
         if (_tapeBlocks[i].samplePos <= pos) { best = i; break; }
     }
     if (best >= 0) {
-        $(`#tape-programs .tape-prog-item[data-idx="${best}"]`).addClass('active');
+        const item = document.querySelector(`#tape-programs .tape-prog-item[data-idx="${best}"]`);
+        item?.classList.add('active');
     }
 }
 
@@ -836,9 +889,11 @@ function analyzeTape(tape) {
         renderTapeBlocks([]);
         return;
     }
-    $('#tape-programs')
-        .html('<div class="tape-analyzing"><i class="fas fa-spinner fa-spin"></i> Analyzing…</div>')
-        .show();
+    const zone = document.querySelector('#tape-programs');
+    if (zone) {
+        zone.innerHTML = '<div class="tape-analyzing"><i class="fas fa-spinner fa-spin"></i> Analyzing…</div>';
+        zone.style.display = '';
+      }
 
     setTimeout(function () {
         const blocks = TapeBlockScanner.scan(tape);
@@ -852,59 +907,18 @@ function analyzeTape(tape) {
  */
 function resetTapeDisplay() {
     _tapeBlocks = [];
-    $('#tape-programs').hide().empty();
-}
-
-/**
- * Overrides the rewind and fast-forward buttons with smart block navigation
- * when blocks have been detected, falling back to continuous tape movement otherwise.
- * Rewind jumps to the previous block (> 500 samples before current position);
- * forward jumps to the next block (> 500 samples after current position).
- */
-function rebindTapeNavigation() {
-
-    $('#tape-rewind').off('click').on('click', function () {
-        if (_tapeBlocks.length) {
-            const cur  = TapeController.tapePosition;
-            let   prev = null;
-            for (let i = _tapeBlocks.length - 1; i >= 0; i--) {
-                if (_tapeBlocks[i].samplePos < cur - 500) { prev = _tapeBlocks[i].samplePos; break; }
-            }
-            if (prev !== null) {
-                TapeController.tapePosition = prev;
-                TapeController.updateTapeUI();
-                highlightTapeBlock(prev);
-                return;
-            }
-        }
-        const pos = TapeController.tapePosition;
-        TapeController.setTapeState(pos > 0 ? TapeController.STATE_REWIND : TapeController.STATE_STOP);
-    });
-
-    $('#tape-forward').off('click').on('click', function () {
-        if (_tapeBlocks.length) {
-            const cur  = TapeController.tapePosition;
-            const next = _tapeBlocks.find(b => b.samplePos > cur + 500);
-            if (next) {
-                TapeController.tapePosition = next.samplePos;
-                TapeController.updateTapeUI();
-                highlightTapeBlock(next.samplePos);
-                return;
-            }
-        }
-        const disk = Tape_Recorder.diskImage;
-        TapeController.setTapeState(
-            disk && TapeController.tapePosition < disk.size - 1
-                ? TapeController.STATE_FORWARD
-                : TapeController.STATE_STOP
-        );
-    });
+    const zone = document.querySelector('#tape-programs');
+    if (!zone) return;
+    zone.style.display = 'none';
+    zone.replaceChildren();
+    zone.querySelectorAll('.tape-prog-item').forEach((n) => _tapeEcouteurs.delete(n));
 }
 
 
-// =============================================================================
+
+// ---------------------------------------------------------------------------
 // TapeController patches
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * Applies three monkey-patches to TapeController to enrich its methods
@@ -928,14 +942,14 @@ function rebindTapeNavigation() {
     TapeController.setTapeState = function (newState) {
         _origSetTapeState(newState);
 
-        $('#tape-record, #tape-play, #tape-rewind, #tape-forward')
-            .removeClass('recording playing rewinding forwarding');
+        poserClasses('#tape-record, #tape-play, #tape-rewind, #tape-forward',
+            { remove: ['recording', 'playing', 'rewinding', 'forwarding'] });
 
         switch (newState) {
-            case TapeController.STATE_RECORD:  $('#tape-record') .addClass('recording');  break;
-            case TapeController.STATE_PLAY:    $('#tape-play')   .addClass('playing');    break;
-            case TapeController.STATE_REWIND:  $('#tape-rewind') .addClass('rewinding');  break;
-            case TapeController.STATE_FORWARD: $('#tape-forward').addClass('forwarding'); break;
+            case TapeController.STATE_RECORD:  poserClasses('#tape-record',  { add: ['recording'] });  break;
+            case TapeController.STATE_PLAY:    poserClasses('#tape-play',    { add: ['playing'] });    break;
+            case TapeController.STATE_REWIND:  poserClasses('#tape-rewind',  { add: ['rewinding'] });  break;
+            case TapeController.STATE_FORWARD: poserClasses('#tape-forward', { add: ['forwarding'] }); break;
         }
     };
 
@@ -954,13 +968,6 @@ function rebindTapeNavigation() {
         _origEjectTape();
         resetTapeDisplay();
     };
-
-})();
-
-
-// =============================================================================
-// Tape_Sample_Manager
-// =============================================================================
 
 /**
  * @namespace Tape_Sample_Manager
@@ -1026,7 +1033,7 @@ const Tape_Sample_Manager = {
      * @param {number} index - Tape position.
      * @returns {number} 0 or 1.
      */
-    tapeReadBlock (index)         { return this.getPulseBit(index);         },
+    tapeReadBlock (index)         { return this.getPulseBit(index);           },
 
     /**
      * Alias for setPulseBit — compatibility interface used by TapeController.
@@ -1037,10 +1044,20 @@ const Tape_Sample_Manager = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // DOM bindings
-// =============================================================================
+// ---------------------------------------------------------------------------
+})();
 
-$(document).ready(function () {
+
+(function () {
+    function demarrer() {
     UI_Manager.bindTape();
-});
+      };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', demarrer, { once: true });
+    } else {
+        demarrer();
+    }
+})();

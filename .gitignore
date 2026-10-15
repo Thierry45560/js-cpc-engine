@@ -1,0 +1,73 @@
+# =============================================================================
+# Deux livrables, un seul arbre de travail
+# =============================================================================
+#
+#   1. DÉPÔT GITHUB — le moteur seul
+#      `SRC/` (source canonique), les suites Z80/ZEXALL, leur outillage,
+#      `examples/`, la documentation et la configuration npm.
+#
+#   2. SITE WEB (www.js-cpc.fr) — `site/` seul
+#      Pages, styles, bibliothèques tierces, ROM et données de jeux. Rien de
+#      `site/` n'est versionné : il est transféré chez l'hébergeur, pas poussé.
+#
+# `site/js/` est le MIROIR de `SRC/`, régénéré par `npm run sync:site` ; il ne
+# s'édite jamais à la main. `npm run check:site` vérifie que les deux copies
+# sont identiques — à lancer avant tout transfert FTP.
+#
+# `SRC/` est la seule copie éditée à la main.
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Site web — hors dépôt
+# -----------------------------------------------------------------------------
+# Le dossier entier : pages HTML, CSS, `js/` (miroir de SRC/), `libs/`, `ROM/`,
+# `DSK/`, `SNA/`, `thumbnail/`, `WAV/`, favicon et `.htaccess`.
+site/
+
+# -----------------------------------------------------------------------------
+# Suites de tests propres au DEV (hors dépôt)
+# -----------------------------------------------------------------------------
+# Seules les suites du cœur Z80 et ZEXALL accompagnent le moteur publié :
+# `tests/z80/`, plus les harnais `z80-harness.mjs`, `z80-reference.mjs`,
+# `zexall-runner.mjs` et la fixture `tests/fixtures/zexall.com`.
+# Les suites ci-dessous dépendent de harnais périphériques et d'un Chromium
+# (Playwright) : elles restent locales, pour le DEV futur.
+tests/audio/
+tests/browser/
+tests/dom/
+tests/peripherals/
+tests/system/
+tests/video/
+tests/z80-disassembler.test.mjs
+tests/basic-tokenizer.test.mjs
+tests/conditional-branches.disassembler.test.mjs
+tests/helpers/asic-harness.mjs
+tests/helpers/crtc-harness.mjs
+tests/helpers/display-harness.mjs
+tests/helpers/gatearray-harness.mjs
+tests/helpers/keyboard-harness.mjs
+tests/helpers/printer-harness.mjs
+tests/helpers/psg-harness.mjs
+vitest.browser.config.mjs
+
+# -----------------------------------------------------------------------------
+# Outillage local
+# -----------------------------------------------------------------------------
+# Dépendances installées par npm (devDependencies : vitest, playwright)
+node_modules/
+
+# Couverture produite par `npm run test:coverage`
+coverage/
+
+# Rapport des tests navigateur produit par `npm run test:browser`
+test-results/
+
+# État local de l'outil
+.freebuff/
+
+# Journaux et fichiers temporaires
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

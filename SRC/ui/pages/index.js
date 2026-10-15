@@ -1,19 +1,17 @@
 /**
  * @file        index.js
- * @description Script de la page d'accueil — Année dynamique du footer
- *              et citation aléatoire CPC/Z80/Amstrad.
+ * @description Home page script: dynamic footer year and a random
+ *              CPC/Z80/Amstrad quote.
  * @author      Thierry MAIGNAN
- * @project     JS CPC V2 — L'Amstrad dans votre Navigateur
+ * @project     JS CPC V2 — Amstrad in your browser
  */
 
 'use strict';
 
-/* ── Année dynamique du footer ──────────────────────────────── */
+/* Dynamic footer year */
 document.getElementById('footer-year').textContent = new Date().getFullYear();
 
-/* ─────────────────────────────────────────────────────────────
-   50 citations aléatoires CPC / Z80 / Amstrad
-   ───────────────────────────────────────────────────────────── */
+/* 50 random CPC / Z80 / Amstrad quotes */
 var PHRASES = [
     '10 PRINT "HELLO, WORLD!" : GOTO 10',
     'RUN"BATMAN.BAS',
@@ -68,8 +66,8 @@ var PHRASES = [
 ];
 
 /**
- * Affiche une citation aléatoire dans le bloc "Le CPC a la parole"
- * avec une transition d'opacité.
+ * Shows a random quote in the "Le CPC a la parole" block, with an opacity
+ * transition.
  */
 function showRandomPrompt() {
     var idx  = Math.floor(Math.random() * PHRASES.length);
@@ -84,5 +82,5 @@ function showRandomPrompt() {
     }, 150);
 }
 
-/* ── Affichage initial ───────────────────────────────────────── */
+/* -- Affichage initial ----------------------------------------- */
 showRandomPrompt();

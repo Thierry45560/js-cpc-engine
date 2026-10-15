@@ -8,11 +8,11 @@
  * Load order in index.html:
  *   1. DSK_Parser.js        — disk image structure
  *   2. FDC_Controller.js    — µPD765 logic and drive descriptors  (this file)
- *   3. Floppy_UI.js         — file upload, catalogue, jQuery bindings
+ *   3. Floppy_UI.js         — file upload, catalogue, DOM bindings
  *
  * Dependencies (globals):
  *   DSK_Parser, Config_Manager, CPU_Z80, throwError, toHex8, toHex16, arrayToHexString
- * No direct jQuery or DOM dependency except LED colour via ledElement.style.
+ * No DOM dependency except the UI reflection in updateUI().
  */
 
 "use strict";
@@ -166,15 +166,20 @@ const Floppy_Controller_FDC = {
             [this.PHASE_EXECUTE]: "execute",
             [this.PHASE_RESULT]:  "result",
         };
-        $("#fdc_phase").val(phaseLabels[this.fdcPhase] ?? "");
-        $("#fdc_command").val(
-            this.fdcPhase === this.PHASE_IDLE ? "" : this.fdcCurrentCommand.getOpName()
-        );
-        this.motorOn
-            ? $("#fdc_motor").attr("checked", "checked")
-            : $("#fdc_motor").removeAttr("checked");
-        $("#drivea_track").text(Floppy_Drive_A.trackId);
-        $("#driveb_track").text(Floppy_Drive_B.trackId);
+        const phase = document.querySelector("#fdc_phase");
+        if (phase) phase.value = phaseLabels[this.fdcPhase] ?? "";
+        const commande = document.querySelector("#fdc_command");
+        if (commande) {
+            commande.value = this.fdcPhase === this.PHASE_IDLE
+                ? ""
+                : this.fdcCurrentCommand.getOpName();
+        }
+        const moteur = document.querySelector("#fdc_motor");
+        if (moteur) moteur.checked = this.motorOn;
+        const pisteA = document.querySelector("#drivea_track");
+        if (pisteA) pisteA.textContent = Floppy_Drive_A.trackId;
+        const pisteB = document.querySelector("#driveb_track");
+        if (pisteB) pisteB.textContent = Floppy_Drive_B.trackId;
     },
 
     /**
@@ -541,9 +546,9 @@ const Floppy_Controller_FDC = {
         this.setFdcPhase(this.PHASE_COMMAND);
     },
 
-    // ==========================================================================
+    // ---------------------------------------------------------------------------
     // Command descriptor objects
-    // ==========================================================================
+    // ---------------------------------------------------------------------------
 
     /**
      * READ DATA (opcode 0x06) — reads sectors sequentially from the current track.
@@ -907,9 +912,9 @@ Floppy_Controller_FDC.cmdSeek.dataDirection            = Floppy_Controller_FDC.D
 Floppy_Controller_FDC.cmdInvalid.dataDirection         = Floppy_Controller_FDC.DIR_NONE;
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Drive descriptors
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace Floppy_Drive_A

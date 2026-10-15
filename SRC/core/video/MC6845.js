@@ -56,9 +56,9 @@ const DEFAULT_CRTC = {
 };
 
 
-// ===============================================================================
+// ---------------------------------------------------------------------------
 // CRTC_Manager — Polymorphic dispatcher
-// ===============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace CRTC_Manager
@@ -276,20 +276,37 @@ const CRTC_Manager = {
      */
     updateUI() {
         for (let i = 0; i <= 17; i++) {
-            $(`#crtc_r${i}`).text(toHex8(this.registers[i])).removeClass("dasm-selected");
+            const cellule = document.querySelector(`#crtc_r${i}`);
+            if (!cellule) continue;
+            cellule.textContent = toHex8(this.registers[i]);
+            cellule.classList.remove("dasm-selected");
         }
-        $(`#crtc_r${this.selectedRegister}`).addClass("dasm-selected");
-        $("#crtc_vcc").text(toHex8(this.vcc));
-        $("#crtc_vlc").text(toHex8(this.vlc_crtc));
-        $("#crtc_vsc").text(toHex8(this.vsc_counter));
-        $("#crtc_vtac").text(toHex8(this.vtac_counter));
-        $("#crtc_hcc").text(toHex8(this.hcc_counter));
-        $("#crtc_hsc").text(toHex8(this.hsyncCounter));
+        document.querySelector(`#crtc_r${this.selectedRegister}`)?.classList.add("dasm-selected");
 
-        this.hsyncActive  ? $("#crtc_hsc").addClass("dasm-selected")  : $("#crtc_hsc").removeClass("dasm-selected");
-        this.vsyncActive  ? $("#crtc_vsc").addClass("dasm-selected")  : $("#crtc_vsc").removeClass("dasm-selected");
-        this.vblankActive ? $("#crtc_vtac").addClass("dasm-selected") : $("#crtc_vtac").removeClass("dasm-selected");
-        this.border ? $("#border").attr("checked", "checked") : $("#border").removeAttr("checked");
+        const compteurs = {
+            "#crtc_vcc"  : this.vcc,
+            "#crtc_vlc"  : this.vlc_crtc,
+            "#crtc_vsc"  : this.vsc_counter,
+            "#crtc_vtac" : this.vtac_counter,
+            "#crtc_hcc"  : this.hcc_counter,
+            "#crtc_hsc"  : this.hsyncCounter,
+        };
+        for (const selecteur in compteurs) {
+            const cellule = document.querySelector(selecteur);
+            if (cellule) cellule.textContent = toHex8(compteurs[selecteur]);
+        }
+
+        const surligner = (selecteur, actif) => {
+            const cellule = document.querySelector(selecteur);
+            if (!cellule) return;
+            cellule.classList.toggle("dasm-selected", !!actif);
+        };
+        surligner("#crtc_hsc",  this.hsyncActive);
+        surligner("#crtc_vsc",  this.vsyncActive);
+        surligner("#crtc_vtac", this.vblankActive);
+
+        const bordure = document.querySelector("#border");
+        if (bordure) bordure.checked = !!this.border;
     },
 
     /**
@@ -369,9 +386,9 @@ const CRTC_Manager = {
 };
 
 
-// ===============================================================================
+// ---------------------------------------------------------------------------
 // CRTC_Type0 — Hitachi HD6845S
-// ===============================================================================
+// ---------------------------------------------------------------------------
 //
 // Found in CPC 464 and some CPC 664/6128 units.
 // Key characteristics:
@@ -564,9 +581,9 @@ const CRTC_Type0 = {
 };
 
 
-// ===============================================================================
+// ---------------------------------------------------------------------------
 // CRTC_Type1 — UM6845R
-// ===============================================================================
+// ---------------------------------------------------------------------------
 //
 // The most common CRTC found in CPC 6128 machines.
 // Differences from Type0:
@@ -731,9 +748,9 @@ const CRTC_Type1 = {
 };
 
 
-// ===============================================================================
+// ---------------------------------------------------------------------------
 // CRTC_Type2 — MC6845 (CPC+ internal ASIC)
-// ===============================================================================
+// ---------------------------------------------------------------------------
 //
 // Used as the internal CRTC in CPC+ machines.
 // Differences from Type0:
@@ -905,9 +922,9 @@ const CRTC_Type2 = {
 };
 
 
-// ===============================================================================
+// ---------------------------------------------------------------------------
 // CRTC_Type3 — CPC+ advanced ASIC (split screen, HScroll)
-// ===============================================================================
+// ---------------------------------------------------------------------------
 //
 // Used in CPC 464+ and GX4000.
 // Extended features beyond Type0/2:

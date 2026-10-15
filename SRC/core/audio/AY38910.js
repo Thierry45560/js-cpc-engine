@@ -10,7 +10,9 @@
  *
  * Dependencies are injected via {@link PSG_Sound_AY38910.link} (wired in CPC_Bus.js):
  *   - `getPpiPortC`    {Function} → returns PPI_8255.portC (bits 7:6 = PSG mode)
- *   - `readKeyboardRow`{Function} → Keyboard_Manager.readMatrixRow()
+ *   - `readKeyboardRow`{Function} → CPC_INPUT.keyboard.readAYPort(PPI_8255.portC & 0x0F)
+ *     (this read, and not `readMatrixRow()`, opens the AutoType gate —
+ *     see `Keyboard.readAYPort`)
  *
  * Output produced each {@link PSG_Sound_AY38910.Clock_Cycle}:
  *   - `Output_ChanA`, `Output_ChanB`, `Output_ChanC` — floats in [0..1]
@@ -36,8 +38,8 @@ const PSG_Sound_AY38910 = {
     link(bus) {
         if (bus.getPpiPortC)     this._getPpiPortC     = bus.getPpiPortC;
         if (bus.readKeyboardRow) this._readKeyboardRow = bus.readKeyboardRow;
-        if (!this._getPpiPortC && this._bus)     this._getPpiPortC     = () => this._bus.ppiPortC;
-        if (!this._readKeyboardRow && this._bus) this._readKeyboardRow = () => this._readKeyboardRow();
+        if (!this._getPpiPortC && this._bus)       this._getPpiPortC     = () => this._bus.ppiPortC;
+        if (!this._readKeyboardRow && this._bus)   this._readKeyboardRow = () => this._bus.readKeyboardRow();
     },
 
     /**
@@ -181,6 +183,15 @@ const PSG_Sound_AY38910 = {
         this.Envelope_Gen.Update_Cycles = 0;
 
         for (let i = 0; i < 16; i++) { this.Select_Register(i); this.Write_Register(0); }
+
+        // The loop above ends on R15: R0 is the state expected right after
+        // power-up.
+        this.Sel_Reg_Index = 0;
+
+        // `Noise_Gen.Noise_Output_Bit` and `Noise_Gen.Counter_Val` are written by
+        // no register and must be reset explicitly.
+        this.Noise_Gen.Noise_Output_Bit = 0;
+        this.Noise_Gen.Counter_Val       = 0;
     },
 
     /**

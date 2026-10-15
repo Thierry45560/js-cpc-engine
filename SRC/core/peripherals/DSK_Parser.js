@@ -7,7 +7,7 @@
  * Extracted from the monolithic Floppy.js to follow the Single Responsibility Principle:
  *   - DSK_Parser.js     → binary parsing only, no DOM dependency (this file)
  *   - FDC_Controller.js → µPD765 FDC emulation, depends on DSK_Parser
- *   - Floppy_UI.js      → HTML5 upload, AMSDOS catalogue, jQuery bindings
+ *   - Floppy_UI.js      → HTML5 upload, AMSDOS catalogue, DOM bindings
  *
  * Supported formats:
  *   - Standard  ("MV - CPCEMU" / "MV - CPC Disk-File")
@@ -16,7 +16,7 @@
  *     Variable track size encoded per track/side in the header table (offset 52+).
  *
  * Dependencies: `bytesToString`, `read16bitLE`, `Config_Manager.debugMode` (globals).
- * No jQuery or DOM dependency.
+ * No DOM dependency.
  */
 
 /**

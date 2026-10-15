@@ -95,6 +95,16 @@ const Cart_Drive = {
 };
 
 
-$(document).ready(function () {
+(function () {
+    function demarrer() {
     UI_Manager.bindCartridge();
-});
+    };
+
+    // Native replacement of `$(document).ready(fn)`. `demarrer` is declared inside
+    // this IIFE, so the guard has to be written here too.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', demarrer, { once: true });
+    } else {
+        demarrer();
+    }
+})();

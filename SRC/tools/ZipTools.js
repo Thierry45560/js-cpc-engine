@@ -1,36 +1,37 @@
 /**
- * JS CPC Module: ZipTools
+ * @file ZipTools.js
+ * @module ZipTools
  *
- * Parseurs partagés (utilisés par plusieurs modules).
+ * Shared parsers.
  *
- *   · ZIP_Parser  - archives .ZIP (stocké + deflate via inflate())
+ *   · ZIP_Parser - .ZIP archives (stored + deflate through inflate())
  */
 
 "use strict";
 
-// ===============================================================================
-// ZIP_Parser - Archives .ZIP
-// ===============================================================================
+// ---------------------------------------------------------------------------
+// ZIP_Parser - .ZIP archives
+// ---------------------------------------------------------------------------
 //
-//  Supporte : méthode 0 (stocké) et méthode 8 (deflate via inflate()).
-//  Limite : pas de support ZIP64, pas de chiffrement, pas de multi-disque.
+//  Supports method 0 (stored) and method 8 (deflate through inflate()).
+//  No ZIP64, no encryption, no multi-disk.
 //
-//  Usage :
+//  Usage:
 //    const zip = new ZIP_Parser(data);   // data = Uint8Array
 //    const file = zip.extract("file.dsk");
 //
-//  Propriétés exposées :
-//    zip.filelist  - tableau d'entrées de fichier
-//    zip.zipFiles  - dictionnaire filename → entrée
+//  Exposed properties:
+//    zip.filelist  - array of file entries
+//    zip.zipFiles  - filename → entry dictionary
 //    zip.fileComment
 
-// Table de transcodage CP437 → Unicode (caractères de contrôle 0-31)
+// CP437 → Unicode table (control characters 0-31)
 const _CP437_CTRL = [
     0, 9786, 9787, 9829, 9830, 9827, 9824, 8226, 9688, 9675, 9689, 9794,
     9792, 9834, 9835, 9788, 9658, 9668, 8597, 8252, 182, 167, 9644, 8616,
     8593, 8595, 8594, 8592, 8735, 8596, 9650, 9660
 ];
-// Table CP437 → Unicode (caractères hauts 128-255)
+// CP437 → Unicode table (high characters 128-255)
 const _CP437_HIGH = [
     199, 252, 233, 226, 228, 224, 229, 231, 234, 235, 232, 239, 238, 236, 196, 197,
     201, 230, 198, 244, 246, 242, 251, 249, 255, 214, 220, 162, 163, 165, 8359, 402,
@@ -44,7 +45,7 @@ const _CP437_HIGH = [
 ];
 
 /**
- * Décode un tableau d'octets CP437 en chaîne JavaScript.
+ * Decodes a CP437 byte array into a JavaScript string.
  * @param {Uint8Array} bytes
  * @returns {string}
  */
@@ -61,7 +62,7 @@ function _decodeCp437(bytes) {
 }
 
 /**
- * Décode un tableau d'octets UTF-8 en chaîne JavaScript.
+ * Decodes a UTF-8 byte array into a JavaScript string.
  * @param {Uint8Array} bytes
  * @returns {string}
  */
@@ -90,7 +91,7 @@ function ZIP_Parser(data) {
     if (data.length < 22) throw new Error("Invalid ZIP: file too short");
     if (read32bitLE(data, 0) !== 0x04034B50) throw new Error("Invalid ZIP: bad local magic");
 
-    // Recherche de la signature End-of-Central-Directory (0x06054B50)
+    // Look for the End-of-Central-Directory signature (0x06054B50).
     let eocdPos = data.length - 22;
     while (eocdPos >= 0 && read32bitLE(data, eocdPos) !== 0x06054B50) eocdPos--;
     if (eocdPos < 0) throw new Error("ZIP: could not find end of central directory");
@@ -101,7 +102,7 @@ function ZIP_Parser(data) {
     this.fileComment = _decodeCp437(data.subarray(eocdPos + 22));
     if (this.fileComment.length !== read16bitLE(eocd, 20)) throw new Error("ZIP: invalid comment");
 
-    // Lecture du répertoire central
+    // Read the central directory.
     const cdSize   = read32bitLE(eocd, 12);
     const cdOffset = read32bitLE(eocd, 16);
     const cd       = data.subarray(cdOffset, cdOffset + cdSize);
@@ -161,7 +162,7 @@ function ZIP_Parser(data) {
             ? _decodeUtf8(cd.subarray(pos + 46 + nameLen + extraLen, pos + 46 + nameLen + extraLen + commentLen))
             : _decodeCp437(cd.subarray(pos + 46 + nameLen + extraLen, pos + 46 + nameLen + extraLen + commentLen));
 
-        // Vérifications d'intégrité
+        // Integrity checks.
         const BIG = 1.8446744073709552e19;
         if (entry.zipUncompressedSize === BIG || entry.zipUncompressedSize === 0xFFFFFFFF
             || entry.zipCompressedSize === 0xFFFFFFFF || entry.zipLocalHeaderOffset === 0xFFFFFFFF) {
@@ -177,15 +178,15 @@ function ZIP_Parser(data) {
 }
 
 /**
- * Extrait un fichier par son nom.
+ * Extracts a file by name.
  * @param {string} filename
- * @returns {Uint8Array} données décompressées
+ * @returns {Uint8Array} decompressed data
  */
 ZIP_Parser.prototype.extract = function (filename) {
     const entry = this.zipFiles[filename];
     if (!entry) throw new Error(`ZIP: file not present in archive: ${filename}`);
 
-    // Lecture du header local (pour obtenir les tailles réelles de nom+extra)
+    // Read the local header (to get the real name+extra lengths).
     const lhOffset = entry.zipLocalHeaderOffset;
     const lh       = this.data.subarray(lhOffset, lhOffset + 30);
     if (read32bitLE(lh, 0) !== 0x04034B50) throw new Error("ZIP: bad local file header magic");
@@ -194,7 +195,7 @@ ZIP_Parser.prototype.extract = function (filename) {
     const lhExtraLen = read16bitLE(lh, 28);
     const dataStart  = lhOffset + 30 + lhNameLen + lhExtraLen;
 
-    // Vérifie que le nom du header local correspond au répertoire central
+    // The local header name must match the central directory.
     const lhName = entry.zipIsEncrypted
         ? _decodeUtf8(this.data.subarray(lhOffset + 30, lhOffset + 30 + lhNameLen))
         : _decodeCp437(this.data.subarray(lhOffset + 30, lhOffset + 30 + lhNameLen));

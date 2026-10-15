@@ -17,9 +17,9 @@
  *   - Canvas resize logic lives in UI_DOM.js, not here.
  */
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Video_Hardware — HTML5 Canvas rendering
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace Video_Hardware
@@ -374,9 +374,9 @@ const Video_Hardware = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Display_Sync_Manager — software PLL for frame synchronisation
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace Display_Sync_Manager
@@ -398,6 +398,8 @@ const Display_Sync_Manager = {
 
     /** @type {Function|null} */ _display     : null,
     /** @type {Function|null} */ _setPixelIndex: null,
+    /** Called after each emulated frame is rendered, independent of host FPS. */
+    _onFrame: null,
 
     /** Canvas pixel width (passed from Video_Hardware). @type {number} */
     displayWidth : 768,
@@ -413,6 +415,7 @@ const Display_Sync_Manager = {
         if ('displayHeight' in bus) this.displayHeight = bus.displayHeight;
         if (bus.display)             this._display      = bus.display;
         if (bus.setPixelIndex)       this._setPixelIndex = bus.setPixelIndex;
+        if (bus.onFrame)             this._onFrame = bus.onFrame;
     },
 
     /**
@@ -549,6 +552,7 @@ const Display_Sync_Manager = {
 
         if (forceRender || vsyncReady) {
             this._display();
+            this._onFrame?.();
 
             if (this.driftCompensation > 512) {
                 if (this.baseCyclesPerFrame > 16128) this.baseCyclesPerFrame -= 256;

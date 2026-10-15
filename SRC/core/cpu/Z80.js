@@ -1,6 +1,6 @@
 "use strict";
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 //  Z80 CPU Core — Amstrad CPC / CPC+ / GX4000
 //  ZEALL ready
 //
@@ -21,11 +21,11 @@
 //      cpu.ioWriteAddr
 //      cpu.ioWriteVal
 //    and reset cpu.ioWriteState = 0 after processing.
-// =============================================================================
+// ---------------------------------------------------------------------------
 
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 //  Flags LUT — S, Z, Y, X, P precomputed for all 256 values
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 const Z80_FLAGS_SZP_LUT = new Uint8Array([
     68, 0, 0, 4, 0, 4, 4, 0, 8, 12, 12, 8, 12, 8, 8, 12,
@@ -46,10 +46,10 @@ const Z80_FLAGS_SZP_LUT = new Uint8Array([
     164, 160, 160, 164, 160, 164, 164, 160, 168, 172, 172, 168, 172, 168, 168, 172
 ]);
 
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 //  Module-level constants — resolved at parse time, zero property-lookup cost
 //  in hot paths (add8, sub8, inc8, dec8, cp8, flag updates…)
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 // Individual flag bit masks
 const MASK_S = 128, MASK_Z = 64, MASK_Y = 32, MASK_H = 16;
@@ -75,15 +75,15 @@ const COND_MAP = new Uint8Array([BIT_Z, 0, SHIFT_X, BIT_S]);
 // Abstract reg index (0:B 1:C 2:D 3:E 4:H 5:L 6:F 7:A) to TypedArray byte offset
 const R8_MAP = new Uint8Array([1, 0, 3, 2, 5, 4, 6, 7]);
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 //  Z80_CPU Class
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 class Z80_CPU {
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Constructor
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     constructor(bus) {
         if (!bus) throw new Error("Z80_CPU: a bus object is required.");
@@ -95,8 +95,10 @@ class Z80_CPU {
         }
 
         // Direct references — avoids repeated property chains in hot paths
-        this._read    = bus.readMemory.bind(bus);
-        this._write   = bus.writeMemory.bind(bus);
+        this._readBus  = bus.readMemory.bind(bus);
+        this._writeBus = bus.writeMemory.bind(bus);
+        this._read     = this._readBus;
+        this._write    = this._writeBus;
         this._readIO  = bus.readIO.bind(bus);
         this._ticks   = bus.executeTicks.bind(bus);
         this._intStat = bus.getIntStatus.bind(bus);
@@ -133,6 +135,27 @@ class Z80_CPU {
         // Deferred IO write — host reads after exec() then resets ioWriteState = 0
         this.ioWriteState = 0; this.ioWriteAddr = 0; this.ioWriteVal = 0;
 
+        // Optional hook called WITH the address of every instruction, just
+        // before it is fetched. Null by default (zero cost). Costs one JS
+        // call per instruction, so prefer the built-in history (see
+        // activerHistorique) for a plain address record. Has no effect on ZEXALL.
+        this.onInstruction = null;
+
+        // Optional memory trace: { m1(pc), read(adresse, valeur),
+        // write(adresse, valeur) }. Null by default. See brancherTrace().
+        this.trace = null;
+
+        // Circular history of executed instruction addresses.
+        // Filled INLINE by exec(), without a function call: it allows the
+        // actually executed flow (JR, CALL, RET, RETI…) to be followed at
+        // almost no cost. Null by default: no cost until it is armed.
+        // See activerHistorique().
+        this.historiquePc      = null;
+        this.historiqueTaille  = 0;
+        this.historiqueMasque  = 0;
+        this.historiqueIdx     = 0;
+        this.historiqueRemplis = 0;
+
         // Opcode jump tables
         this.opcodes       = new Array(256);
         this.opcodesCB     = new Array(256);
@@ -144,9 +167,9 @@ class Z80_CPU {
         this.reset();
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  State
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     getState() {
         return {
@@ -168,25 +191,130 @@ class Z80_CPU {
         this.isHalted = this.interruptPending = false;
         this.isPrefix = true; this.isPrefixCB = false;
         this.ioWriteState = 0;
+        // A reset starts from a fresh PC: whatever ran before no longer
+        // precedes anything. The buffer itself is kept (no reallocation).
+        this.historiqueIdx = 0;
+        this.historiqueRemplis = 0;
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Main execution entry point
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     exec() {
         let opcode;
         if (this.isPrefixCB) {
             opcode = this.fetchOpcode(); this.isPrefixCB = false; this.opcodes[opcode]();
         } else if (this.interruptPending) {
+            // Instruction-start tracking, in priority order
+            // history > trace > hook. Deliberately INLINE (not a call):
+            // this is the hot loop. The same block appears below — any fix
+            // must be applied to both places.
+            const historique = this.historiquePc;
+            if (historique !== null) {
+                historique[this.historiqueIdx] = this.regPC;
+                this.historiqueIdx = (this.historiqueIdx + 1) & this.historiqueMasque;
+                if (this.historiqueRemplis < this.historiqueTaille) this.historiqueRemplis++;
+            } else if (this.trace) this.trace.m1(this.regPC);
+            else if (this.onInstruction) this.onInstruction(this.regPC);
+
             opcode = this.fetchOpcode(); this.iff2 = this.iff1 = 1; this.interruptPending = false; this.opcodes[opcode]();
         } else if (this._intStat() !== 0 && this.iff1) {
             if (this.isPrefix) this._ticks(1);
             this.handleInterrupt();
         } else {
+            // Same block as the `interruptPending` case above.
+            const historique = this.historiquePc;
+            if (historique !== null) {
+                historique[this.historiqueIdx] = this.regPC;
+                this.historiqueIdx = (this.historiqueIdx + 1) & this.historiqueMasque;
+                if (this.historiqueRemplis < this.historiqueTaille) this.historiqueRemplis++;
+            } else if (this.trace) this.trace.m1(this.regPC);
+            else if (this.onInstruction) this.onInstruction(this.regPC);
+
             opcode = this.fetchOpcode(); this.opcodes[opcode]();
         }
         this.isPrefix = true;
+    }
+
+    /**
+     * Attaches a memory trace: M1 (instruction start), read, write.
+     *
+     * Accesses go through wrappers installed on `_read`/`_write` rather than
+     * a test in the hot path: without a trace, execution pays nothing.
+     * Call `detacherTrace()` to restore the direct bus references.
+     *
+     * The wrappers receive the LOGICAL address; translating it to a physical
+     * one is up to the trace if it needs it.
+     *
+     * @param {{m1: Function, read: Function, write: Function}} trace
+     * @returns {void}
+     */
+    brancherTrace(trace) {
+        if (!trace) { this.detacherTrace(); return; }
+
+        const lire   = this._readBus;
+        const ecrire = this._writeBus;
+
+        this._read  = (adresse)          => { const v = lire(adresse); trace.read(adresse, v); return v; };
+        this._write = (adresse, valeur)  => { ecrire(adresse, valeur); trace.write(adresse, valeur); };
+        this.trace  = trace;
+    }
+
+    /**
+     * Removes the trace and gives the hot path back its direct references.
+     * @returns {void}
+     */
+    detacherTrace() {
+        this._read  = this._readBus;
+        this._write = this._writeBus;
+        this.trace  = null;
+    }
+
+    /**
+     * Arms the circular history of executed instruction addresses.
+     *
+     * Filling is done by `exec()` itself, without a function call: a
+     * disassembler can therefore know WHICH instructions really led to PC
+     * (a JR, a CALL or a RET make "PC − n" wrong) at no extra cost in the
+     * hot loop beyond two writes and one test.
+     *
+     * `taille` must be a power of two: circular indexing is done by mask
+     * (`&`), not by modulo.
+     *
+     * @param {number} taille - Number of kept addresses (e.g. 4).
+     * @returns {void}
+     */
+    activerHistorique(taille) {
+        this.historiquePc      = new Int32Array(taille);
+        this.historiqueTaille  = taille;
+        this.historiqueMasque  = taille - 1;
+        this.historiqueIdx     = 0;
+        this.historiqueRemplis = 0;
+    }
+
+    /**
+     * Disarms the history: `exec()` resumes its path without recording.
+     * @returns {void}
+     */
+    desactiverHistorique() {
+        this.historiquePc      = null;
+        this.historiqueTaille  = 0;
+        this.historiqueMasque  = 0;
+        this.historiqueIdx     = 0;
+        this.historiqueRemplis = 0;
+    }
+
+    /**
+     * Address of the i-th executed instruction, from oldest to most recent.
+     * i = 0 returns the oldest one still kept.
+     * @param {number} i - Logical index (0 <= i < historiqueRemplis).
+     * @returns {number} Address, or 0 when the history is inactive or the index is out of range.
+     */
+    adresseExecutee(i) {
+        if (this.historiquePc === null || i < 0 || i >= this.historiqueRemplis) return 0;
+        const plusAncienne = this.historiqueRemplis < this.historiqueTaille ? 0 : this.historiqueIdx;
+        return this.historiquePc[(plusAncienne + i) & this.historiqueMasque];
     }
 
     doNMI() { this.iff1 = 0; this.incR(); this.op_NMI(); }
@@ -202,9 +330,9 @@ class Z80_CPU {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Fetch
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     fetchOpcode() {
         const val = this._read(this.regPC);
@@ -225,16 +353,16 @@ class Z80_CPU {
         return (val & 0x80) === 0 ? val : val - 256;
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Deferred IO (CPC OUT timing)
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     ioWriteHigh(addr, val) { this.ioWriteState = 1; this.ioWriteAddr = addr; this.ioWriteVal = val; }
     ioWriteLow (addr, val) { this.ioWriteState = 2; this.ioWriteAddr = addr; this.ioWriteVal = val; }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Stack
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     pushWord(val) {
         this.regSP = (this.regSP - 1) & 0xFFFF; this._write(this.regSP, val >>> 8);
@@ -248,9 +376,9 @@ class Z80_CPU {
         return (hi << 8) | lo;
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Register pairs
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     getPair(p, useAF = false) {
         if (p === 3) return useAF ? this.r16[3] : this.regSP;
@@ -268,9 +396,9 @@ class Z80_CPU {
         return this.r16[p];
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  ALU — hot paths, module-level constants used directly (no this. lookup)
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     add8(operand, carryIn) {
         const a = this.r8[7], res = a + operand + carryIn;
@@ -311,9 +439,9 @@ class Z80_CPU {
         this.r8[6] = (Z80_FLAGS_SZP_LUT[res8] & FLAG_SZ) | (operand & FLAG_YX) | c | hc | ov | MASK_N;
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Block instructions
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     doBlockTransfer(step) {
         const bc = (this.r16[0] - 1) & 0xFFFF; this.r16[0] = bc;
@@ -350,27 +478,27 @@ class Z80_CPU {
         if (this.r8[1] !== 0) { this._ticks(1); this.regPC = (this.regPC - 2) & 0xFFFF; }
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Bit rotations
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
-    op_RLC_helper(val) { const c = val >>> 7;  const r = ((val << 1) & 0xFF) | c;       this.r8[6] = Z80_FLAGS_SZP_LUT[r] | c;       return r; }
-    op_RRC_helper(val) { const c = val & 1;    const r = (val >>> 1) | (c << 7);        this.r8[6] = Z80_FLAGS_SZP_LUT[r] | c;       return r; }
+    op_RLC_helper(val) { const c = val >>> 7;  const r = ((val << 1) & 0xFF) | c;      this.r8[6] = Z80_FLAGS_SZP_LUT[r] | c;           return r; }
+    op_RRC_helper(val) { const c = val & 1;    const r = (val >>> 1) | (c << 7);       this.r8[6] = Z80_FLAGS_SZP_LUT[r] | c;           return r; }
     op_RL_helper (val) { const r = ((val << 1) & 0xFF) | (this.r8[6] & MASK_C);        this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val >>> 7); return r; }
     op_RR_helper (val) { const r = (val >>> 1) | ((this.r8[6] & MASK_C) << 7);         this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val & 1);   return r; }
-    op_SLA_helper(val) { const r = (val << 1) & 0xFF;                                   this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val >>> 7); return r; }
-    op_SRA_helper(val) { const r = (val & 128) | (val >> 1);                            this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val & 1);   return r; }
-    op_SLL_helper(val) { const r = ((val << 1) & 0xFF) | 1;                             this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val >>> 7); return r; }
-    op_SRL_helper(val) { const r = val >>> 1;                                            this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val & 1);   return r; }
+    op_SLA_helper(val) { const r = (val << 1) & 0xFF;                                  this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val >>> 7); return r; }
+    op_SRA_helper(val) { const r = (val & 128) | (val >> 1);                           this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val & 1);   return r; }
+    op_SLL_helper(val) { const r = ((val << 1) & 0xFF) | 1;                            this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val >>> 7); return r; }
+    op_SRL_helper(val) { const r = val >>> 1;                                          this.r8[6] = Z80_FLAGS_SZP_LUT[r] | (val & 1);   return r; }
 
     incR() {
         this.regR = ((this.regR + 1) & 127) | (this.regR & 128);
         if (this.isHalted) { this.isHalted = false; this.regPC = (this.regPC + 1) & 0xFFFF; }
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Instructions
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     op_NOP()  { this._ticks(1); }
     op_HALT() { this._ticks(1); this.isHalted = true; this.regPC = (this.regPC - 1) & 0xFFFF; }
@@ -449,10 +577,10 @@ class Z80_CPU {
         this.regWZ = this.r16[2];
     }
 
-    op_INC_r(reg) { this._ticks(1); this.r8[R8_MAP[reg]] = this.inc8(this.r8[R8_MAP[reg]]); }
-    op_DEC_r(reg) { this._ticks(1); this.r8[R8_MAP[reg]] = this.dec8(this.r8[R8_MAP[reg]]); }
-    op_INC_HL()   { this._ticks(3); this._write(this.r16[2], this.inc8(this._read(this.r16[2]))); }
-    op_DEC_HL()   { this._ticks(3); this._write(this.r16[2], this.dec8(this._read(this.r16[2]))); }
+    op_INC_r(reg)   { this._ticks(1); this.r8[R8_MAP[reg]] = this.inc8(this.r8[R8_MAP[reg]]); }
+    op_DEC_r(reg)   { this._ticks(1); this.r8[R8_MAP[reg]] = this.dec8(this.r8[R8_MAP[reg]]); }
+    op_INC_HL()     { this._ticks(3); this._write(this.r16[2], this.inc8(this._read(this.r16[2]))); }
+    op_DEC_HL()     { this._ticks(3); this._write(this.r16[2], this.dec8(this._read(this.r16[2]))); }
 
     op_ADD_A_r(reg) { this._ticks(1); this.add8(this.r8[R8_MAP[reg]], 0); }
     op_ADD_A_n()    { const v = this.fetchByte(); this._ticks(2); this.add8(v, 0); }
@@ -462,29 +590,29 @@ class Z80_CPU {
     op_ADC_A_n()    { const v = this.fetchByte(); this._ticks(2); this.add8(v, this.r8[6] & 1); }
     op_ADC_A_HL()   { this._ticks(2); this.add8(this._read(this.r16[2]), this.r8[6] & 1); }
 
-    op_SUB_r(reg) { this._ticks(1); this.sub8(this.r8[R8_MAP[reg]], 0); }
-    op_SUB_n()    { const v = this.fetchByte(); this._ticks(2); this.sub8(v, 0); }
-    op_SUB_HL()   { this._ticks(2); this.sub8(this._read(this.r16[2]), 0); }
+    op_SUB_r(reg)   { this._ticks(1); this.sub8(this.r8[R8_MAP[reg]], 0); }
+    op_SUB_n()      { const v = this.fetchByte(); this._ticks(2); this.sub8(v, 0); }
+    op_SUB_HL()     { this._ticks(2); this.sub8(this._read(this.r16[2]), 0); }
 
     op_SBC_A_r(reg) { this._ticks(1); this.sub8(this.r8[R8_MAP[reg]], this.r8[6] & 1); }
     op_SBC_A_n()    { const v = this.fetchByte(); this._ticks(2); this.sub8(v, this.r8[6] & 1); }
     op_SBC_A_HL()   { this._ticks(2); this.sub8(this._read(this.r16[2]), this.r8[6] & 1); }
 
-    op_AND_r(reg) { this._ticks(1); this.and8(this.r8[R8_MAP[reg]]); }
-    op_AND_n()    { const v = this.fetchByte(); this._ticks(2); this.and8(v); }
-    op_AND_HL()   { this._ticks(2); this.and8(this._read(this.r16[2])); }
+    op_AND_r(reg)   { this._ticks(1); this.and8(this.r8[R8_MAP[reg]]); }
+    op_AND_n()      { const v = this.fetchByte(); this._ticks(2); this.and8(v); }
+    op_AND_HL()     { this._ticks(2); this.and8(this._read(this.r16[2])); }
 
-    op_OR_r(reg) { this._ticks(1); this.or8(this.r8[R8_MAP[reg]]); }
-    op_OR_n()    { const v = this.fetchByte(); this._ticks(2); this.or8(v); }
-    op_OR_HL()   { this._ticks(2); this.or8(this._read(this.r16[2])); }
+    op_OR_r(reg)    { this._ticks(1); this.or8(this.r8[R8_MAP[reg]]); }
+    op_OR_n()       { const v = this.fetchByte(); this._ticks(2); this.or8(v); }
+    op_OR_HL()      { this._ticks(2); this.or8(this._read(this.r16[2])); }
 
-    op_XOR_r(reg) { this._ticks(1); this.xor8(this.r8[R8_MAP[reg]]); }
-    op_XOR_n()    { const v = this.fetchByte(); this._ticks(2); this.xor8(v); }
-    op_XOR_HL()   { this._ticks(2); this.xor8(this._read(this.r16[2])); }
+    op_XOR_r(reg)   { this._ticks(1); this.xor8(this.r8[R8_MAP[reg]]); }
+    op_XOR_n()      { const v = this.fetchByte(); this._ticks(2); this.xor8(v); }
+    op_XOR_HL()     { this._ticks(2); this.xor8(this._read(this.r16[2])); }
 
-    op_CP_r(reg) { this._ticks(1); this.cp8(this.r8[R8_MAP[reg]]); }
-    op_CP_n()    { const v = this.fetchByte(); this._ticks(2); this.cp8(v); }
-    op_CP_HL()   { this._ticks(2); this.cp8(this._read(this.r16[2])); }
+    op_CP_r(reg)    { this._ticks(1); this.cp8(this.r8[R8_MAP[reg]]); }
+    op_CP_n()       { const v = this.fetchByte(); this._ticks(2); this.cp8(v); }
+    op_CP_HL()      { this._ticks(2); this.cp8(this._read(this.r16[2])); }
 
     op_DAA() {
 		this._ticks(1);
@@ -600,9 +728,9 @@ class Z80_CPU {
         this.regWZ = (addr + 1) & 0xFFFF; this.ioWriteHigh(addr, this.r8[7]); this._ticks(1);
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Prefix decoders
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     decodeCB() { const op = this.fetchOpcode(); this.opcodesCB[op](); }
     decodeED() { const op = this.fetchOpcode(); this.opcodesED[op](); }
@@ -626,9 +754,9 @@ class Z80_CPU {
         else throw new Error(`Z80: Unknown DDFDCB opcode 0x${op.toString(16).padStart(2, '0')}`);
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     //  Opcode table builder
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     initTables() {
         // Error stubs
@@ -637,6 +765,24 @@ class Z80_CPU {
             this.opcodesCB[i]     = () => { throw new Error(`Z80: Unknown CB opcode 0x${i.toString(16).padStart(2, '0')}`); };
             this.opcodesED[i]     = () => { throw new Error(`Z80: Unknown ED opcode 0x${i.toString(16).padStart(2, '0')}`); };
             this.opcodesDDFDCB[i] = () => { throw new Error(`Z80: Unknown DDFDCB opcode 0x${i.toString(16).padStart(2, '0')}`); };
+        }
+
+        // ---- UNDOCUMENTED ED OPCODES: 2-byte NOP ----
+        // Default applied BEFORE the "ED OPCODES" section below, which the
+        // documented overrides replace one by one.
+        //
+        // Zilog UM0081 / SinclairFAQ : « The ED opcodes in the range 00-3F and
+        // 80-FF (except for the block instructions) do nothing at all but
+        // taking up 8 T states and incrementing the R register by 2. »
+        //
+        // No register or flag is touched: this is a plain NOP. `R` is
+        // already incremented by 2 by the two `fetchOpcode()` calls.
+        //
+        // Duration: `_ticks(2)`, matching `ED 4C` (NEG) and `ED 46` (IM 0),
+        // which are also 8 hardware T-states and 2 internal cycles in this
+        // core's model (see tests/z80/timing.test.mjs).
+        for (let i = 0; i < 256; i++) {
+            this.opcodesED[i] = () => { this._ticks(2); this.isPrefix = false; };
         }
 
         // ---- BASE OPCODES ----

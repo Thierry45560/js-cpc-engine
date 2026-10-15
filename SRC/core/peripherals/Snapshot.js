@@ -13,7 +13,7 @@
  *   v3: v2 + FDC / CRTC / ASIC state + extended counters + optional chunks
  *   Chunks follow the RAM at offset 256+dumpSize; only "CPC+" is currently parsed.
  *
- * Global dependencies: Emulator_Core, launch_debugger, JSZip, jQuery ($)
+ * Global dependencies: Emulator_Core, launch_debugger, JSZip
  */
 
 "use strict";
@@ -41,6 +41,14 @@
  *   Offset 256+       RAM dump, then optional chunks
  */
 const SNA_Parser = {
+
+    /**
+     * RAM size described by the last SNA read or written, in bytes
+     * (64 K, 128 K…). Used by the cumulative disassembler to know how far
+     * memory belongs to the program.
+     * @type {number}
+     */
+    dumpSizeBytes: 0,
 
     /**
      * Parses a SNA file and restores the full emulator state.
@@ -138,6 +146,7 @@ const SNA_Parser = {
             alert("[SNA Parser] Error: Invalid dumpsize");
         }
         const ramBytes = 1024 * dumpSizeKb;
+        this.dumpSizeBytes = ramBytes;
         for (let i = 0; i < ramBytes; i++) Memory_Manager.ramData[i] = data[256 + i];
 
         // v3 extended state — FDC, CRTC counters, sync flags, Gate Array
@@ -187,6 +196,7 @@ const SNA_Parser = {
         try {
             const dumpSizeKb  = (Memory_Manager.ramData.length >= 131072) ? 128 : 64;
             const dumpSizeB   = dumpSizeKb * 1024;
+            this.dumpSizeBytes = dumpSizeB;
             const sna         = new Uint8Array(256 + dumpSizeB);
             const dv          = new DataView(sna.buffer);
 
@@ -422,9 +432,9 @@ const SNA_Parser = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // Snapshot_Manager
-// =============================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * @namespace Snapshot_Manager
@@ -480,7 +490,8 @@ const Snapshot_Manager = {
             document.body.removeChild(a);
         }, 100);
 
-        $('#snapshot-filename').text(filename);
+        const lbl = document.querySelector('#snapshot-filename');
+        if (lbl) lbl.textContent = filename;
         this.currentSnapshot = snaData;
 
         console.log(`[Snapshot] Saved: ${filename} (${snaData.length} bytes)`);
@@ -489,8 +500,9 @@ const Snapshot_Manager = {
     /**
      * Loads and applies a SNA snapshot into the running emulator.
      * Performs a full emulator reset before applying the snapshot state.
-     * After loading, resumes emulation or launches the debugger depending on the
-     * #checkbox-debugger UI setting.
+     * After loading: if the #snapshot-decompile box is ticked, arms the
+     * cumulative disassembly (see preparerDecompilation) and runs; otherwise
+     * resumes emulation or launches the debugger per #checkbox-debugger.
      * @param {ArrayBuffer|Uint8Array} arrayBuffer - Raw SNA file data.
      * @returns {boolean} True if the snapshot was loaded successfully.
      */
@@ -514,8 +526,13 @@ const Snapshot_Manager = {
             SNA_Parser.parseFile(data);
             this.currentSnapshot = data;
 
+            const decompile = this.preparerDecompilation();
+
             if (typeof Emulator_Core !== 'undefined') {
-                if ($('#checkbox-debugger').is(':checked')) {
+                if (decompile) {
+                    // Step-by-step analysis keeps the emulator paused and
+                    // resumes it itself when done: nothing to do here.
+                } else if (document.querySelector('#checkbox-debugger')?.checked) {
                     if (typeof launch_debugger === 'function') launch_debugger();
                 } else {
                     Emulator_Core.resumeEmulator();
@@ -528,6 +545,48 @@ const Snapshot_Manager = {
             alert('Error loading snapshot: ' + error.message);
             return false;
         }
+    },
+
+    /**
+     * Applies the "Decompile" choice of the Snapshots card.
+     *
+     * When checked: the table is cleared, the capture is armed and a
+     * step-by-step analysis runs with the emulator paused; at the end the
+     * initial state is restored and the emulation resumes automatically.
+     * When unchecked: an ongoing capture is stopped, without touching what
+     * has already been accumulated.
+     *
+     * Does nothing when DisassemblyLog is unavailable (game.html /
+     * cpc-minimal.html do not embed the tool).
+     *
+     * @returns {boolean} True when decompilation is running (the caller must
+     *          NOT resume the emulator).
+     */
+    preparerDecompilation() {
+        if (typeof DisassemblyLog === 'undefined') return false;
+
+        if (document.querySelector('#snapshot-decompile')?.checked !== true) {
+            DisassemblyLog.arreter();
+            return false;
+        }
+
+        // Give the listing the full SNA memory size, so the export is not
+        // limited to the areas actually scanned.
+        if (typeof SNA_Parser !== 'undefined' && SNA_Parser.dumpSizeBytes > 0) {
+            DisassemblyLog.definirTailleMemoire(SNA_Parser.dumpSizeBytes);
+        }
+
+        // Clear the table and start the capture.
+        DisassemblyLog.vider();
+        DisassemblyLog.demarrer();
+
+        // Step-by-step analysis is provided by the cpc-blank page; on other
+        // pages the capture happens during normal execution.
+        if (typeof globalThis.Cumulatif !== 'undefined' &&
+            typeof globalThis.Cumulatif.analyserPasAPas === 'function') {
+            return globalThis.Cumulatif.analyserPasAPas(this.currentSnapshot) === true;
+        }
+        return false;
     },
 
     /**
@@ -587,10 +646,20 @@ const Snapshot_Manager = {
 };
 
 
-// =============================================================================
+// ---------------------------------------------------------------------------
 // DOM bindings
-// =============================================================================
+// ---------------------------------------------------------------------------
 
-$(document).ready(function () {
+(function () {
+    function demarrer() {
     UI_Manager.bindSnapshot();
-});
+    };
+
+    // Replacement for `$(document).ready(fn)`.
+    // `demarrer` is declared inside the IIFE, so the guard is placed here too.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', demarrer, { once: true });
+    } else {
+        demarrer();
+    }
+})();

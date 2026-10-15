@@ -1,40 +1,40 @@
 /**
  * @file        game.js
- * @description Logique de la page de jeu — Lecture des paramètres d'URL,
- *              chargement des ROMs, insertion du média et gestion de l'UI
- *              (overlay de chargement, boutons header, son, joystick, plein écran).
+ * @description Game page logic — URL parameter parsing, ROM loading, media
+ *              insertion and UI management (loading overlay, header buttons,
+ *              sound, joystick, fullscreen).
  * @author      Thierry MAIGNAN
- * @project     JS CPC V2 — L'Amstrad dans votre Navigateur
- * @depends     jQuery, Emulator_Core, CPU_Z80, Audio_Output, Config_Manager,
- *              DSK_Parser, SNA_Parser, Floppy_Drive_A, AutoType, Keyboard_Manager
+ * @project     JS CPC V2 — Amstrad in your browser
+ * @depends     Emulator_Core, CPU_Z80, Audio_Output, Config_Manager,
+ *              DSK_Parser, SNA_Parser, Floppy_Drive_A, CPC_INPUT
  */
 
 'use strict';
 
-/* ─────────────────────────────────────────────────────────────
+/* -------------------------------------------------------------
    STUB — launch_debugger()
-   Requis par Emulator_Core ; le débogueur est désactivé sur game.html.
-   ───────────────────────────────────────────────────────────── */
+   Required by Emulator_Core; the debugger is disabled on game.html.
+   ------------------------------------------------------------- */
 function launch_debugger() {
     try {
         if (typeof CPU_Z80 !== 'undefined') CPU_Z80.updateUI();
-    } catch (e) { /* silencieux */ }
+    } catch (e) { /* silent */ }
 }
 
-/* ─────────────────────────────────────────────────────────────
-   RÉPERTOIRES PAR TYPE DE MÉDIA
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   MEDIA DIRECTORIES BY TYPE
+   ------------------------------------------------------------- */
 var MEDIA_DIRS = {
     disc: '/DSK/',
     snap: '/SNA/',
     cart: '/CPR/'
 };
 
-/* ─────────────────────────────────────────────────────────────
-   LECTURE DES PARAMÈTRES D'URL
-   Nouveau format : ?disc=X | ?snap=X | ?cart=X
-   Ancien format  : ?type=disc&file=X  (rétrocompatibilité)
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   URL PARAMETER PARSING
+   New format    : ?disc=X | ?snap=X | ?cart=X
+   Legacy format : ?type=disc&file=X  (backwards compatibility)
+   ------------------------------------------------------------- */
 (function parseUrlParams() {
     var params = new URLSearchParams(window.location.search);
     var _type, _file;
@@ -53,7 +53,7 @@ var MEDIA_DIRS = {
     window._fullPath = (_type && _file) ? (window._mediaDir + _file) : null;
 }());
 
-/* ── Affichage du nom du jeu dans le header ──────────────────── */
+/* -- Game name display in the header -------------------------- */
 if (window._urlFile) {
     document.getElementById('game-name-display').textContent =
         window._urlFile.replace(/\.[^/.]+$/, '').replace(/[_\-]/g, ' ');
@@ -63,14 +63,14 @@ if (window._urlFile) {
     document.title = 'JS CPC - Démarrage';
 }
 
-/* ─────────────────────────────────────────────────────────────
-   HELPERS — Barre de progression & statut
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   HELPERS — progress bar & status
+   ------------------------------------------------------------- */
 
 /**
- * Met à jour la barre de progression et son libellé.
- * @param {number} pct   Pourcentage (0-100).
- * @param {string} label Texte affiché (HTML autorisé).
+ * Updates the progress bar and its label.
+ * @param {number} pct   Percentage (0-100).
+ * @param {string} label Displayed text (HTML allowed).
  */
 function setLoadingProgress(pct, label) {
     var bar = document.getElementById('loading-bar');
@@ -80,9 +80,9 @@ function setLoadingProgress(pct, label) {
 }
 
 /**
- * Met à jour la pastille de statut dans le header.
- * @param {string} text  Texte à afficher.
- * @param {string} state Classe CSS : 'loading' | 'running' | 'error'.
+ * Updates the status pill in the header.
+ * @param {string} text  Text to display.
+ * @param {string} state CSS class: 'loading' | 'running' | 'error'.
  */
 function setStatus(text, state) {
     var pill = document.getElementById('status-pill');
@@ -92,7 +92,7 @@ function setStatus(text, state) {
 }
 
 /**
- * Cache l'overlay de chargement et tente de démarrer l'audio.
+ * Hides the loading overlay and tries to start the audio.
  */
 function hideLoadingOverlay() {
     var ov = document.getElementById('loading-overlay');
@@ -103,24 +103,23 @@ function hideLoadingOverlay() {
     setTimeout(async function () {
         if (typeof Audio_Output   === 'undefined') return;
         if (typeof Config_Manager !== 'undefined' && !Config_Manager.soundEnabled) return;
-        try { await Audio_Output.Resume(); } catch (e) { /* silencieux */ }
+        try { await Audio_Output.Resume(); } catch (e) { /* silent */ }
     }, 300);
 }
 
-/* ─────────────────────────────────────────────────────────────
-   AUDIO — Init au premier geste utilisateur
-   ───────────────────────────────────────────────────────────── */
-// L'init audio est déclenchée par le clic sur #btn-sound (bindGameHeader)
-// ou automatiquement via bindSoundButton() dans Emulator_Setup.js.
-// Pas de one('click') séparé : évite la race condition double-init.
+/* -------------------------------------------------------------
+   AUDIO — init on the first user gesture
+   ------------------------------------------------------------- */
+// Audio init is triggered by a click on #btn-sound (bindGameHeader) or
+// automatically through bindSoundButton() in Emulator_Setup.js.
 
-/* ─────────────────────────────────────────────────────────────
-   CHARGEMENT D'UN FICHIER MÉDIA VIA XHR
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   MEDIA FILE LOADING VIA XHR
+   ------------------------------------------------------------- */
 
 /**
- * Récupère un fichier binaire et rapporte la progression.
- * @param {string}   url       URL du fichier.
+ * Fetches a binary file and reports the progress.
+ * @param {string}   url       File URL.
  * @param {Function} onSuccess Callback(Uint8Array).
  * @param {Function} onError   Callback(errorMessage).
  */
@@ -151,24 +150,24 @@ function fetchMedia(url, onSuccess, onError) {
     xhr.send();
 }
 
-/* ─────────────────────────────────────────────────────────────
-   INSERTION DU MÉDIA DANS L'ÉMULATEUR
-   Appelée après hardReset() + délai d'init.
-   ───────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------
+   MEDIA INSERTION INTO THE EMULATOR
+   Called after hardReset() + init delay.
+   ------------------------------------------------------------- */
 
 /**
- * Insère le média (DSK, SNA ou CPR) dans l'émulateur.
+ * Inserts the media (DSK, SNA or CPR) into the emulator.
  * @param {string}    type     'disc' | 'snap' | 'cart'.
- * @param {Uint8Array} data    Contenu binaire du fichier.
- * @param {string}    filename Nom du fichier (sans chemin).
+ * @param {Uint8Array} data    File binary content.
+ * @param {string}    filename File name (without path).
  */
 function insertMedia(type, data, filename) {
     setLoadingProgress(95, 'Insertion du média...');
 
     try {
         if (type === 'snap') {
-            /* ── Snapshot .SNA ──────────────────────────────────── */
-            if (typeof SNA_Parser  === 'undefined') throw new Error('SNA_Parser non disponible');
+            /* -- Snapshot .SNA ------------------------------------ */
+            if (typeof SNA_Parser  === 'undefined') throw new Error('SNA_Parser unavailable');
             if (typeof Emulator_Core !== 'undefined') {
                 Emulator_Core.pauseEmulator();
                 Emulator_Core.reset();
@@ -177,7 +176,7 @@ function insertMedia(type, data, filename) {
             if (typeof Emulator_Core !== 'undefined') Emulator_Core.resumeEmulator();
 
         } else if (type === 'cart') {
-            /* ── Cartouche .CPR (CPC+) ──────────────────────────── */
+            /* -- Cartridge .CPR (CPC+) ---------------------------- */
             var cprPath = 'AUTOLOAD/' + filename;
             window.files          = window.files || {};
             window.files[cprPath] = data;
@@ -185,26 +184,31 @@ function insertMedia(type, data, filename) {
             if (typeof Emulator_Core !== 'undefined') Emulator_Core.hardReset();
 
         } else {
-            /* ── Disquette .DSK ─────────────────────────────────── */
-            if (typeof Floppy_Drive_A === 'undefined') throw new Error('Floppy_Drive_A non disponible');
-            if (typeof DSK_Parser     === 'undefined') throw new Error('DSK_Parser non disponible');
+            /* -- Disk .DSK ---------------------------------------- */
+            if (typeof Floppy_Drive_A === 'undefined') throw new Error('Floppy_Drive_A unavailable');
+            if (typeof DSK_Parser     === 'undefined') throw new Error('DSK_Parser unavailable');
 
             Floppy_Drive_A.diskImage = DSK_Parser.parseFile(data);
 
-            // Synchronise l'UI fantôme
-            $('#drivea-filename').text(filename);
-            $('#drivea-eject').removeClass('disabled-button').addClass('button');
+            // Sync the legacy UI
+            var lblDrivea = document.getElementById('drivea-filename');
+            if (lblDrivea) lblDrivea.textContent = filename;
+            var ejectDrivea = document.getElementById('drivea-eject');
+            if (ejectDrivea) {
+                ejectDrivea.classList.remove('disabled-button');
+                ejectDrivea.classList.add('button');
+            }
 
-            // Flash LED Drive A
+            // Flash the Drive A LED
             var led = document.getElementById('drivea-led');
             if (led) {
                 led.classList.add('active');
                 setTimeout(function () { led.classList.remove('active'); }, 1000);
             }
 
-            // ── AUTO-RUN ─────────────────────────────────────────
+            // -- AUTO-RUN -----------------------------------------
             var autoRunTarget = null;
-            if ($('#autorun-option').is(':checked')) {
+            if (document.querySelector('#autorun-option')?.checked) {
                 try {
                     var fileList   = DSK_Parser.getDirectory(Floppy_Drive_A.diskImage);
                     autoRunTarget  = (typeof getAutoRunTarget === 'function')
@@ -213,10 +217,10 @@ function insertMedia(type, data, filename) {
                     if (autoRunTarget) {
                         console.log('[game.js] AutoRun → ' + autoRunTarget);
                     } else {
-                        console.warn('[game.js] AutoRun : aucune cible trouvée dans le catalogue');
+                        console.warn('[game.js] AutoRun: no target found in the catalogue');
                     }
                 } catch (e) {
-                    console.warn('[game.js] AutoRun : erreur scan catalogue', e);
+                    console.warn('[game.js] AutoRun: catalogue scan error', e);
                 }
             }
 
@@ -224,9 +228,9 @@ function insertMedia(type, data, filename) {
             setTimeout(function () {
                 setLoadingProgress(98, 'Auto-Run...');
                 if (autoRunTarget &&
-                    typeof AutoType          !== 'undefined' &&
-                    typeof Keyboard_Manager  !== 'undefined') {
-                    AutoType.inject('RUN"' + autoRunTarget + '\r');
+                    typeof CPC_INPUT !== 'undefined' &&
+                    CPC_INPUT.keyboard) {
+                    CPC_INPUT.keyboard.autotype('RUN"' + autoRunTarget + '\r');
                 }
                 setTimeout(function () {
                     hideLoadingOverlay();
@@ -234,10 +238,10 @@ function insertMedia(type, data, filename) {
                 }, 600);
             }, 2000);
 
-            return; // L'overlay est géré dans le setTimeout ci-dessus
+            return; // The overlay is handled in the setTimeout above
         }
 
-        // Snap / Cart / Boot : overlay fermé rapidement
+        // Snap / Cart / Boot: overlay closed quickly
         setLoadingProgress(100, 'Démarrage...');
         setTimeout(function () {
             hideLoadingOverlay();
@@ -252,65 +256,74 @@ function insertMedia(type, data, filename) {
     }
 }
 
-/* ─────────────────────────────────────────────────────────────
-   SÉQUENCE PRINCIPALE — document.ready
-   ───────────────────────────────────────────────────────────── */
-$(document).ready(function () {
+/* -------------------------------------------------------------
+   MAIN SEQUENCE — DOM ready
+   ------------------------------------------------------------- */
+(function () {
+    function demarrer() {
 
-    /* ── 1. Initialisation des globaux ───────────────────────── */
+    /* -- 1. Global initialisation ------------------------------ */
     if (typeof window.files === 'undefined') window.files = {};
 
-    /* ── 2. Neutralisation des boutons fantômes ─────────────── */
-    // Détachement des handlers génériques — le reset est rebindé via UI_Manager
-    $('#button-reset').off('click').on('click', function () {
+    /* -- 2. Detach the legacy buttons -------------------------- */
+        // Detach the generic handlers; the reset handler is rebound here.
+        // `UI_Manager.detach()` keeps the listener reference in UI_DOM.js
+        // so that it can be removed.
+        UI_Manager.detach('#button-run');
+        UI_Manager.detach('#button-step');
+        UI_Manager.detach('#button-stepover');
+        UI_Manager.detach('#button-turbo');
+        UI_Manager.detach('#checkbox-settings');
+        UI_Manager.detach('#option-panel-overlay');
+        UI_Manager.detach('#settings-close');
+
+        var boutonReset = document.getElementById('button-reset');
+        UI_Manager.detach('#button-reset');
+        if (boutonReset) {
+            boutonReset.addEventListener('click', function () {
         if (typeof Emulator_Core !== 'undefined') Emulator_Core.hardReset();
     });
-    $('#button-run').off('click');
-    $('#button-step').off('click');
-    $('#button-stepover').off('click');
-    $('#button-turbo').off('click');
-    $('#checkbox-settings').off('click');
-    $('#option-panel-overlay').off('click');
-    $('#settings-close').off('click');
+        }
 
-    // Volume slider fantôme
+    // Legacy volume slider
     if (typeof Config_Manager !== 'undefined' && typeof Config_Manager.initVolumeSlider === 'function') {
         Config_Manager.initVolumeSlider();
     }
 
-    // Drives fantômes
+    // Legacy drives
     if (typeof attachDriveEvents === 'function') {
-        try { attachDriveEvents(Floppy_Drive_B); } catch (e) { /* optionnel */ }
-        try { attachDriveEvents(Tape_Recorder);  } catch (e) { /* optionnel */ }
+        try { attachDriveEvents(Floppy_Drive_B); } catch (e) { /* optional */ }
+        try { attachDriveEvents(Tape_Recorder);  } catch (e) { /* optional */ }
     }
 
-    /* ── 3. Boutons du header RÉEL ───────────────────────────── */
-    // Bindings déplacés dans UI_DOM.js → UI_Manager.bindGameHeader()
+    /* -- 3. Real header buttons ------------------------------- */
+    // Bindings moved to UI_DOM.js -> UI_Manager.bindGameHeader()
     UI_Manager.bindGameHeader();
 
-    // Synchronisation de la pastille de statut (mis à jour par Video_System.js)
+    // Status pill sync (updated by Video_System.js)
     var _lastStatus = '';
     setInterval(function () {
-        var s = $('#status').text();
+            var s = document.getElementById('status')?.textContent;
         if (s && s !== _lastStatus) {
             _lastStatus = s;
             var stateClass = 'loading';
             if (s === 'Running' || s === 'En cours') stateClass = 'running';
             else if (s.toLowerCase().indexOf('erreur') >= 0) stateClass = 'error';
             else if (s === 'Prêt')                           stateClass = 'running';
-            $('#status-pill').attr('class', 'status-pill ' + stateClass);
+                var pilule = document.getElementById('status-pill');
+                if (pilule) pilule.className = 'status-pill ' + stateClass;
         }
     }, 300);
 
-    /* ── 4. Chargement des ROMs ──────────────────────────────── */
+    /* -- 4. ROM loading ---------------------------------------- */
     var ROM_PATH   = 'ROM/';
     var lang       = (typeof getCookie === 'function') ? getCookie('firmware') : null;
     if (lang !== 'english' && lang !== 'french' && lang !== 'spanish') lang = 'english';
 
     /**
-     * Retourne la liste des ROMs à charger selon le modèle et la langue.
-     * @param {string} machine  Identifiant boot (ex: 'boot_cpc6128').
-     * @param {string} l        Langue ('english' | 'french' | 'spanish').
+     * Returns the list of ROMs to load for the given model and language.
+     * @param {string} machine  Boot identifier (e.g. 'boot_cpc6128').
+     * @param {string} l        Language ('english' | 'french' | 'spanish').
      * @returns {string[]}
      */
     function getRoms(machine, l) {
@@ -326,7 +339,13 @@ $(document).ready(function () {
     }
 
     var machineVal = (window._urlType === 'cart') ? 'boot_6128plus' : 'boot_cpc6128';
-    if (window._urlType === 'cart') $('#snapshot').val('boot_6128plus').trigger('change');
+        if (window._urlType === 'cart') {
+            var selecteurMachine = document.getElementById('snapshot');
+            if (selecteurMachine) {
+                selecteurMachine.value = 'boot_6128plus';
+                selecteurMachine.dispatchEvent(new Event('change'));
+            }
+        }
 
     var romList    = getRoms(machineVal, lang);
     var romsLoaded = 0;
@@ -359,7 +378,7 @@ $(document).ready(function () {
 
             Emulator_Core.hardReset();
 
-            /* ── 5. Chargement & insertion du média ─────────────── */
+            /* -- 5. Media loading & insertion --------------------- */
             if (window._fullPath) {
                 setLoadingProgress(60, 'Chargement : <span>' + window._urlFile + '</span>');
                 fetchMedia(
@@ -370,7 +389,7 @@ $(document).ready(function () {
                         }, 800);
                     },
                     function (errMsg) {
-                        console.error('[game.js] Erreur média :', errMsg);
+                        console.error('[game.js] Media error:', errMsg);
                         setLoadingProgress(100, '⚠ ' + errMsg);
                         setStatus('Erreur média', 'error');
                         setTimeout(function () {
@@ -380,7 +399,7 @@ $(document).ready(function () {
                     }
                 );
             } else {
-                // Pas de fichier → boot BASIC standard
+                // No file -> standard BASIC boot
                 setTimeout(function () {
                     hideLoadingOverlay();
                     setStatus('Prêt', 'running');
@@ -393,4 +412,13 @@ $(document).ready(function () {
         loadRom(romList[i], onRomLoaded);
     }
 
-}); // fin document.ready
+    };
+
+    // Replacement for `$(document).ready(fn)`.
+    // `demarrer` is declared inside the IIFE, so the guard is placed here too.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', demarrer, { once: true });
+    } else {
+        demarrer();
+    }
+})();
